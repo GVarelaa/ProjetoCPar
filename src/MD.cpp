@@ -470,8 +470,8 @@ double Potential() {
                 double r2 = diff1*diff1 + diff2*diff2 + diff3*diff3;
 
                 double quot = sigma/sqrt(r2);
-                double term1 = pow(quot, 12.);
-                double term2 = pow(quot, 6.);
+                double term1 = quot * quot * quot * quot * quot * quot * quot * quot * quot * quot * quot * quot;
+                double term2 = quot * quot * quot * quot * quot * quot;
                 
                 Pot += factor*(term1 - term2);
         }
@@ -490,12 +490,12 @@ void computeAccelerations() {
     double f, rSqd;
     double rij[3]; // position of i relative to j
     
-    
     for (i = 0; i < N; i++) {  // set all accelerations to zero
         for (k = 0; k < 3; k++) {
             a[i][k] = 0;
         }
     }
+
     for (i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         for (j = i+1; j < N; j++) {
             // initialize r^2 to zero
