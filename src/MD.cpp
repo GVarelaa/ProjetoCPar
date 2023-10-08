@@ -461,19 +461,20 @@ double Potential() {
     double Pot = 0., factor = 8*epsilon;
 
     for (int i=0; i<N; i++) {
+        double ri0 = r[i][0], ri1 = r[i][1], ri2 = r[i][2];
         for (int j=i+1; j<N; j++) {
-                // Loop Unroll
-                double diff1 = r[i][0]-r[j][0];
-                double diff2 = r[i][1]-r[j][1];
-                double diff3 = r[i][2]-r[j][2];
+            // Loop Unroll
+            double diff1 = ri0-r[j][0];
+            double diff2 = ri1-r[j][1];
+            double diff3 = ri2-r[j][2];
 
-                double r2 = diff1*diff1 + diff2*diff2 + diff3*diff3;
+            double r2 = diff1*diff1 + diff2*diff2 + diff3*diff3;
 
-                double quot = sigma/sqrt(r2);
-                double term1 = quot * quot * quot * quot * quot * quot * quot * quot * quot * quot * quot * quot;
-                double term2 = quot * quot * quot * quot * quot * quot;
-                
-                Pot += factor*(term1 - term2);
+            double quot = sigma/sqrt(r2);
+            double term2 = quot * quot * quot * quot * quot * quot;
+            double term1 = term2 * term2;
+            
+            Pot += factor*(term1 - term2);
         }
     }
     
@@ -487,35 +488,50 @@ double Potential() {
 //   accelleration of each atom. 
 void computeAccelerations() {
     int i, j, k;
-    double f, rSqd;
-    double rij[3]; // position of i relative to j
+    double f, rSqd, rijX, rijY, rijZ;
     
     for (i = 0; i < N; i++) {  // set all accelerations to zero
-        for (k = 0; k < 3; k++) {
-            a[i][k] = 0;
-        }
+        a[i][0] = 0;
+        a[i][1] = 0;
+        a[i][2] = 0;
     }
 
     for (i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
+        double ai0 = 0.0, ai1 = 0.0, ai2 = 0.0;
+        double ri0 = r[i][0], ri1 = r[i][1], ri2 = r[i][2];
         for (j = i+1; j < N; j++) {
             // initialize r^2 to zero
             rSqd = 0;
             
-            for (k = 0; k < 3; k++) {
-                //  component-by-componenent position of i relative to j
-                rij[k] = r[i][k] - r[j][k];
-                //  sum of squares of the components
-                rSqd += rij[k] * rij[k];
-            }
+            rijX = ri0 - r[j][0];
+            rijY = ri1 - r[j][1];
+            rijZ = ri2 - r[j][2];
+
+            rSqd = rijX*rijX + rijY*rijY + rijZ*rijZ;
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            f = 24 * (2 * pow(rSqd, -7) - pow(rSqd, -4));
-            for (k = 0; k < 3; k++) {
-                //  from F = ma, where m = 1 in natural units!
-                a[i][k] += rij[k] * f;
-                a[j][k] -= rij[k] * f;
-            }
+            double rSqd3 = rSqd * rSqd * rSqd;
+            double term2 = 1 / (rSqd3 * rSqd);
+            double term1 = term2 / rSqd3;
+            f = 24 * (2 * term1 - term2);
+
+            //  from F = ma, where m = 1 in natural units!
+            double fx = rijX * f;
+            double fy = rijY * f;
+            double fz = rijZ * f;
+
+            ai0 += fx;
+            ai1 += fy;
+            ai2 += fz;
+
+            a[j][0] -= fx;
+            a[j][1] -= fy;
+            a[j][2] -= fz;
         }
+
+        a[i][0] += ai0;
+        a[i][1] += ai1;
+        a[i][2] += ai2;
     }
 }
 
