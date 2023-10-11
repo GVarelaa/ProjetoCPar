@@ -1,6 +1,6 @@
 CC = gcc
 SRC = src/
-CFLAGS = -Ofast -pg -g -fno-omit-frame-pointer
+CFLAGS = -Ofast -ftree-vectorize -msse4
 
 .DEFAULT_GOAL = MD.exe
 
