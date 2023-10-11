@@ -280,6 +280,7 @@ int main()
     
     
     int tenp = floor(NumTime/10);
+    double vol = Vol * VolFac;
     fprintf(ofp,"  time (s)              T(t) (K)              P(t) (Pa)           Kinetic En. (n.u.)     Potential En. (n.u.) Total En. (n.u.)\n");
     printf("  PERCENTAGE OF CALCULATION COMPLETE:\n  [");
     for (i=0; i<NumTime+1; i++) {
@@ -319,8 +320,8 @@ int main()
         // Instantaneous gas constant and compressibility - not well defined because
         // pressure may be zero in some instances because there will be zero wall collisions,
         // pressure may be very high in some instances because there will be a number of collisions
-        gc = NA*Press*(Vol*VolFac)/(N*Temp);
-        Z  = Press*(Vol*VolFac)/(N*kBSI*Temp);
+        gc = NA*Press*vol/(N*Temp);
+        Z  = Press*vol/(N*kBSI*Temp);
         
         Tavg += Temp;
         Pavg += Press;
@@ -549,11 +550,12 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     //computeAccelerations();
     //  Update positions and velocity with current velocity and acceleration
     //printf("  Updated Positions!\n");
+    double halfDT = 0.5*dt;
     for (i=0; i<N; i++) {
         for (j=0; j<3; j++) {
-            r[3*i + j] += v[i][j]*dt + 0.5*a[3*i + j]*dt*dt;
+            r[3*i + j] += v[i][j]*dt + halfDT*a[3*i + j]*dt;
             
-            v[i][j] += 0.5*a[3*i + j]*dt;
+            v[i][j] += halfDT * a[3*i + j];
         }
         //printf("  %i  %6.4e   %6.4e   %6.4e\n",i,r[i][0],r[i][1],r[i][2]);
     }
@@ -562,7 +564,7 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     //  Update velocity with updated acceleration
     for (i=0; i<N; i++) {
         for (j=0; j<3; j++) {
-            v[i][j] += 0.5*a[3*i + j]*dt;
+            v[i][j] += halfDT*a[3*i + j];
         }
     }
     
