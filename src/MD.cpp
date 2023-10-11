@@ -280,7 +280,7 @@ int main()
     
     
     int tenp = floor(NumTime/10);
-    double vol = Vol * VolFac;
+    double Volume = Vol * VolFac;
     fprintf(ofp,"  time (s)              T(t) (K)              P(t) (Pa)           Kinetic En. (n.u.)     Potential En. (n.u.) Total En. (n.u.)\n");
     printf("  PERCENTAGE OF CALCULATION COMPLETE:\n  [");
     for (i=0; i<NumTime+1; i++) {
@@ -320,8 +320,8 @@ int main()
         // Instantaneous gas constant and compressibility - not well defined because
         // pressure may be zero in some instances because there will be zero wall collisions,
         // pressure may be very high in some instances because there will be a number of collisions
-        gc = NA*Press*vol/(N*Temp);
-        Z  = Press*vol/(N*kBSI*Temp);
+        gc = NA*Press*Volume/(N*Temp);
+        Z  = Press*Volume/(N*kBSI*Temp);
         
         Tavg += Temp;
         Pavg += Press;
@@ -335,8 +335,8 @@ int main()
     // we can take the average over the whole simulation here
     Pavg /= NumTime;
     Tavg /= NumTime;
-    Z = Pavg*(Vol*VolFac)/(N*kBSI*Tavg);
-    gc = NA*Pavg*(Vol*VolFac)/(N*Tavg);
+    Z = Pavg*Volume/(N*kBSI*Tavg);
+    gc = NA*Pavg*Volume/(N*Tavg);
     fprintf(afp,"  Total Time (s)      T (K)               P (Pa)      PV/nT (J/(mol K))         Z           V (m^3)              N\n");
     fprintf(afp," --------------   -----------        ---------------   --------------   ---------------   ------------   -----------\n");
     fprintf(afp,"  %8.4e  %15.12f       %15.12f     %10.12f       %10.12f        %10.12e         %i\n",i*dt*timefac,Tavg,Pavg,gc,Z,Vol*VolFac,N);
@@ -349,7 +349,7 @@ int main()
     printf("\n  PV/nT (J * mol^-1 K^-1):                 %15.12f\n",gc);
     printf("\n  PERCENT ERROR of pV/nT AND GAS CONSTANT: %15.12f\n",100*fabs(gc-8.3144598)/8.3144598);
     printf("\n  THE COMPRESSIBILITY (unitless):          %15.12f \n",Z);
-    printf("\n  TOTAL VOLUME (m^3):                      %10.12e \n",Vol*VolFac);
+    printf("\n  TOTAL VOLUME (m^3):                      %10.12e \n",Volume);
     printf("\n  NUMBER OF PARTICLES (unitless):          %i \n", N);
     
     
@@ -552,20 +552,22 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     //printf("  Updated Positions!\n");
     double halfDT = 0.5*dt;
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            r[3*i + j] += v[i][j]*dt + halfDT*a[3*i + j]*dt;
+        r[3*i] += dt*(v[i][0] + halfDT*a[3*i]);
+        r[3*i + 1] += dt*(v[i][1] + halfDT*a[3*i + 1]);
+        r[3*i + 2] += dt*(v[i][2] + halfDT*a[3*i + 2]);
             
-            v[i][j] += halfDT * a[3*i + j];
-        }
+        v[i][0] += halfDT * a[3*i ];
+        v[i][1] += halfDT * a[3*i + 1];
+        v[i][2] += halfDT * a[3*i + 2];
         //printf("  %i  %6.4e   %6.4e   %6.4e\n",i,r[i][0],r[i][1],r[i][2]);
     }
     //  Update accellerations from updated positions
     computeAccelerations();
     //  Update velocity with updated acceleration
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            v[i][j] += halfDT*a[3*i + j];
-        }
+        v[i][0] += halfDT*a[3*i];
+        v[i][1] += halfDT*a[3*i + 1];
+        v[i][2] += halfDT*a[3*i + 2];
     }
     
     // Elastic walls
