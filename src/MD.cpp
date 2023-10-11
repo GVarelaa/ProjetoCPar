@@ -460,9 +460,11 @@ double Kinetic() { //Write Function here!
 double Potential() {
     double Pot = 0., factor = 8*epsilon, diff1, diff2, diff3, r2, quot, quot6, quot12;
     double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma;
-    double sigma12 = sigma * sigma * sigma * sigma * sigma * sigma * sigma * sigma * sigma * sigma * sigma * sigma;
-    
-    for (int i=0; i<N; i++) {
+    double sigma12 = sigma6 * sigma6;
+    double epsilon1 = sigma6 * factor;
+    double epsilon2 = sigma12 * factor;
+
+    for (int i=0; i<N-1; i++) {
         int indexI = 3*i;
         double ri0 = r[indexI], ri1 = r[indexI + 1], ri2 = r[indexI + 2];
         for (int j=i+1; j<N; j++) {
@@ -477,14 +479,14 @@ double Potential() {
             double r2_3 = r2 * r2 * r2;
             double r2_6 = r2_3 * r2_3;
 
-            quot6 = sigma6 / r2_3;
-            quot12 = sigma12 / r2_6;
+            quot6 = epsilon1 / r2_3;
+            quot12 = epsilon2 / r2_6;
             
             Pot += quot12 - quot6;
         }
     }
     
-    return factor*Pot;
+    return Pot;
 }
 
 
@@ -493,32 +495,27 @@ double Potential() {
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom. 
 void computeAccelerations() {
-    int i, j, k;
     double f, rSqd, rijX, rijY, rijZ;
     
-    for (i = 0; i < N; i++) {  // set all accelerations to zero
-        int indexI = 3*i;
-        a[indexI] = 0;
-        a[indexI + 1] = 0;
-        a[indexI + 2] = 0;
+    for (int i = 0; i < N; i++) {  // set all accelerations to zero
+        a[3*i] = 0;
+        a[3*i + 1] = 0;
+        a[3*i + 2] = 0;
     }
 
-    for (i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        int indexI = 3*i;
+    for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         double ai0 = 0.0, ai1 = 0.0, ai2 = 0.0;
-        double ri0 = r[indexI], ri1 = r[indexI + 1], ri2 = r[indexI + 2];
-        for (j = i+1; j < N; j++) {
-            int indexJ = 3*j;
-            rijX = ri0 - r[indexJ];
-            rijY = ri1 - r[indexJ + 1];
-            rijZ = ri2 - r[indexJ + 2];
+        double ri0 = r[3*i], ri1 = r[3*i + 1], ri2 = r[3*i + 2];
+        for (int j = i+1; j < N; j++) {
+            rijX = ri0 - r[3*j];
+            rijY = ri1 - r[3*j + 1];
+            rijZ = ri2 - r[3*j + 2];
 
             rSqd = rijX*rijX + rijY*rijY + rijZ*rijZ;
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            double rSqd4 = rSqd * rSqd * rSqd * rSqd;
-            double term2 = rSqd4;
-            double term1 = rSqd4 * rSqd * rSqd * rSqd;
+            double term2 = rSqd * rSqd * rSqd * rSqd;
+            double term1 = term2 * rSqd * rSqd * rSqd;
             f = (48 / term1) - (24 / term2);//24 * (2 * term1 - term2);
 
             //  from F = ma, where m = 1 in natural units!
@@ -530,14 +527,14 @@ void computeAccelerations() {
             ai1 += fy;
             ai2 += fz;
 
-            a[indexJ] -= fx;
-            a[indexJ + 1] -= fy;
-            a[indexJ + 2] -= fz;
+            a[3*j] -= fx;
+            a[3*j + 1] -= fy;
+            a[3*j + 2] -= fz;
         }
 
-        a[indexI] += ai0;
-        a[indexI + 1] += ai1;
-        a[indexI + 2] += ai2;
+        a[3*i] += ai0;
+        a[3*i + 1] += ai1;
+        a[3*i + 2] += ai2;
     }
 }
 
