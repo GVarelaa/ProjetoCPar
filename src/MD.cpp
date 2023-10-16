@@ -58,6 +58,8 @@ double a[MAXPART*3];
 //  Force
 double F[MAXPART][3];
 
+double PE = 0;
+
 // atom type
 char atype[10];
 //  Function prototypes
@@ -69,13 +71,12 @@ void initialize();
 double VelocityVerlet(double dt, int iter, FILE *fp);  
 //  Compute Force using F = -dV/dr
 //  solve F = ma for use in Velocity Verlet
-void computeAccelerations();
+//  Compute total potential energy from particle coordinates
+void computeAccelsAndPotential();
 //  Numerical Recipes function for generation gaussian distribution
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
 void initializeVelocities();
-//  Compute total potential energy from particle coordinates
-double Potential();
 //  Compute mean squared velocity from particle velocities
 double MeanSquaredVelocity();
 //  Compute total kinetic energy from particle mass and velocities
@@ -88,7 +89,7 @@ int main()
     int i;
     double dt, Vol, Temp, Press, Pavg, Tavg, rho;
     double VolFac, TempFac, PressFac, timefac;
-    double KE, PE, mvs, gc, Z;
+    double KE, mvs, gc, Z;
     char trash[10000], prefix[1000], tfn[1000], ofn[1000], afn[1000];
     FILE *infp, *tfp, *ofp, *afp;
     
@@ -267,7 +268,7 @@ int main()
     //  Based on their positions, calculate the ininial intermolecular forces
     //  The accellerations of each particle will be defined from the forces and their
     //  mass, and this will allow us to update their positions via Newton's law
-    computeAccelerations();
+    computeAccelsAndPotential();
     
     
     // Print number of particles to the trajectory file
@@ -307,12 +308,10 @@ int main()
         
         //  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         //  Now we would like to calculate somethings about the system:
-        //  Instantaneous mean velocity squared, Temperature, Pressure
-        //  Potential, and Kinetic Energy
+        //  Instantaneous mean velocity squared, Temperature, Pressure and Kinetic Energy
         //  We would also like to use the IGL to try to see if we can extract the gas constant
         mvs = MeanSquaredVelocity();
         KE = Kinetic();
-        PE = Potential();
         
         // Temperature from Kinetic Theory
         Temp = m*mvs/(3*kB) * TempFac;
@@ -424,38 +423,14 @@ double Kinetic() { //Write Function here!
 }
 
 
-// Function to calculate the potential energy of the system
-double Potential() {
-    double potential = 0., factor = 8*epsilon, rijX, rijY, rijZ, rSquared;
-    double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma, sigma12 = sigma6 * sigma6;
-    double term1 = sigma12 * factor, term2 = sigma6 * factor;
-
-    for (int i=0; i<N-1; i++) {
-        double riX = r[3*i], riY = r[3*i + 1], riZ = r[3*i + 2];
-        for (int j=i+1; j<N; j++) {
-            rijX = riX-r[3*j];
-            rijY = riY-r[3*j + 1];
-            rijZ = riZ-r[3*j + 2];
-
-            rSquared = rijX*rijX + rijY*rijY + rijZ*rijZ;
-
-            double r6 = rSquared * rSquared * rSquared;
-            double r12 = r6 * r6;
-            
-            potential += (term1 / r12) - (term2 / r6);
-        }
-    }
-    
-    return potential;
-}
-
-
-
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom. 
-void computeAccelerations() {
+void computeAccelsAndPotential() {
     double f, rSquared, rijX, rijY, rijZ;
+    double potential = 0., factor = 8*epsilon;
+    double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma, sigma12 = sigma6 * sigma6;
+    double term1 = sigma12 * factor, term2 = sigma6 * factor;
     
     for (int i = 0; i < N; i++) {  // set all accelerations to zero
         a[3*i] = 0;
@@ -473,10 +448,13 @@ void computeAccelerations() {
 
             rSquared = rijX*rijX + rijY*rijY + rijZ*rijZ;
             
+            double r4 = rSquared * rSquared * rSquared * rSquared;
+            double r6 = r4 * rSquared * rSquared;
+            double r7 = r6 * rSquared;
+            double r12 = r6 * r6;
+
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            double term2 = rSquared * rSquared * rSquared * rSquared;
-            double term1 = term2 * rSquared * rSquared * rSquared;
-            f = (48 / term1) - (24 / term2);
+            f = (48 / r7) - (24 / r4);
 
             //  from F = ma, where m = 1 in natural units!
             double fX = rijX * f;
@@ -490,6 +468,8 @@ void computeAccelerations() {
             a[3*j] -= fX;
             a[3*j + 1] -= fY;
             a[3*j + 2] -= fZ;
+
+            PE += (term1 / r12) - (term2 / r6);
         }
 
         a[3*i] += aiX;
@@ -516,8 +496,8 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
         v[i*3 + 2] += halfDT * a[3*i + 2];
     }
 
-    //  Update accellerations from updated positions
-    computeAccelerations();
+    //  Update accellerations from updated positions and potential
+    computeAccelsAndPotential();
 
     //  Update velocity with updated acceleration
     for (i=0; i<N; i++) {
