@@ -428,7 +428,7 @@ double Kinetic() { //Write Function here!
 //   accelleration of each atom. 
 void computeAccelsAndPotential() {
     double f, rSquared, rijX, rijY, rijZ;
-    double potential = 0., factor = 8*epsilon;
+    double factor = 8*epsilon;
     double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma, sigma12 = sigma6 * sigma6;
     double term1 = sigma12 * factor, term2 = sigma6 * factor;
     
