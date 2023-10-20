@@ -393,33 +393,32 @@ void initialize() {
 
 //  Function to calculate the averaged velocity squared
 double MeanSquaredVelocity() { 
-    double vx2 = 0, vy2 = 0, vz2 = 0, v2;
+    double vSquared = 0.;
     
     for (int i=0; i<N; i++) {
-        vx2 = vx2 + v[i*3]*v[i*3];
-        vy2 = vy2 + v[i*3 + 1]*v[i*3 + 1];
-        vz2 = vz2 + v[i*3 + 2]*v[i*3 + 2];
-        
+        double vX = v[i*3];
+        double vY = v[i*3 + 1];
+        double vZ = v[i*3 + 2];
+
+        vSquared += vX*vX + vY*vY + vZ*vZ;
     }
-    v2 = (vx2+vy2+vz2)/N;
     
-    return v2;
+    return vSquared/N;
 }
 
 //  Function to calculate the kinetic energy of the system
 double Kinetic() { //Write Function here!  
-    double v2, kin;
-    
-    kin =0.;
+    double vSquared = 0.;
+
     for (int i=0; i<N; i++) {
-        v2 = 0.;
-        for (int j=0; j<3; j++) {
-            v2 += v[i*3 + j]*v[i*3 + j];
-        }
-        kin += m*v2/2.;
+        double vX = v[i*3];
+        double vY = v[i*3 + 1];
+        double vZ = v[i*3 + 2];
+
+        vSquared += vX*vX + vY*vY + vZ*vZ;
     }
     
-    return kin;
+    return (m/2.)*vSquared;
 }
 
 
@@ -439,8 +438,7 @@ void computeAccelsAndPotential() {
     }
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        double aiX = 0.0, aiY = 0.0, aiZ = 0.0,
-               riX = r[3*i], riY = r[3*i + 1], riZ = r[3*i + 2];
+        double aiX = 0.0, aiY = 0.0, aiZ = 0.0, riX = r[3*i], riY = r[3*i + 1], riZ = r[3*i + 2];
         for (int j = i+1; j < N; j++) {
             rijX = riX - r[3*j];
             rijY = riY - r[3*j + 1];
@@ -469,7 +467,8 @@ void computeAccelsAndPotential() {
             a[3*j + 1] -= fY;
             a[3*j + 2] -= fZ;
 
-            PE += (term1 / r12) - (term2 / r6);
+            double r6Inv = 1/r6;
+            PE += (term1 * r6Inv * r6Inv) - (term2 * r6Inv);
         }
 
         a[3*i] += aiX;
@@ -481,11 +480,9 @@ void computeAccelsAndPotential() {
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
 double VelocityVerlet(double dt, int iter, FILE *fp) {
     int i, j, k;
-    
-    double psum = 0.;
+    double psum = 0., halfDT = 0.5*dt;
     
     //  Update positions and velocity with current velocity and acceleration
-    double halfDT = 0.5*dt;
     for (i=0; i<N; i++) {
         r[3*i] += dt*(v[i*3] + halfDT*a[3*i]);
         r[3*i + 1] += dt*(v[i*3 + 1] + halfDT*a[3*i + 1]);
@@ -523,18 +520,15 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     return psum/(6*L*L);
 }
 
-
 void initializeVelocities() {
     
     int i, j;
     
     for (i=0; i<N; i++) {
-        
-        for (j=0; j<3; j++) {
-            //  Pull a number from a Gaussian Distribution
-            v[i*3 + j] = gaussdist();
-            
-        }
+        //  Pull a number from a Gaussian Distribution
+        v[i*3] = gaussdist();
+        v[i*3+1] = gaussdist();
+        v[i*3+2] = gaussdist();
     }
     
     // Vcm = sum_i^N  m*v_i/  sum_i^N  M
@@ -542,26 +536,25 @@ void initializeVelocities() {
     double vCM[3] = {0, 0, 0};
     
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            
-            vCM[j] += m*v[i*3 + j];
-            
-        }
+         vCM[0] += m*v[i*3];
+         vCM[1] += m*v[i*3+1];
+         vCM[2] += m*v[i*3+2];
     }
     
     
-    for (i=0; i<3; i++) vCM[i] /= N*m;
+    double Nm = N*m;
+    vCM[0] /= Nm;
+    vCM[1] /= Nm;
+    vCM[2] /= Nm;
     
     //  Subtract out the center-of-mass velocity from the
     //  velocity of each particle... effectively set the
     //  center of mass velocity to zero so that the system does
     //  not drift in space!
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            
-            v[i*3 + j] -= vCM[j];
-            
-        }
+        v[i*3] -= vCM[0];
+        v[i*3+1] -= vCM[1];
+        v[i*3+2] -= vCM[2];
     }
     
     //  Now we want to scale the average velocity of the system
@@ -569,24 +562,21 @@ void initializeVelocities() {
     double vSqdSum, lambda;
     vSqdSum=0.;
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            
-            vSqdSum += v[i*3 + j]*v[i*3 + j];
-            
-        }
+        double vX = v[i*3];
+        double vY = v[i*3+1];
+        double vZ = v[i*3+2];
+
+        vSqdSum += vX*vX + vY*vY + vZ*vZ;
     }
     
     lambda = sqrt( 3*(N-1)*Tinit/vSqdSum);
     
     for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
-            
-            v[i*3 + j] *= lambda;
-            
-        }
+        v[i*3] *= lambda;
+        v[i*3+1] *= lambda;
+        v[i*3+2] *= lambda;
     }
 }
-
 
 //  Numerical recipes Gaussian distribution number generator
 double gaussdist() {
