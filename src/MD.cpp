@@ -50,13 +50,11 @@ double Tinit;  //2;
 //
 const int MAXPART=5001;
 //  Position
-double r[MAXPART*3];
+double r[3][MAXPART];
 //  Velocity
-double v[MAXPART*3];
+double v[3][MAXPART];
 //  Acceleration
-double a[MAXPART*3];
-//  Force
-double F[MAXPART][3];
+double a[3][MAXPART];
 
 double PE = 0;
 
@@ -376,10 +374,9 @@ void initialize() {
         for (j=0; j<n; j++) {
             for (k=0; k<n; k++) {
                 if (p<N) {
-                    
-                    r[3*p] = (i + 0.5)*pos;
-                    r[3*p + 1] = (j + 0.5)*pos;
-                    r[3*p + 2] = (k + 0.5)*pos;
+                    r[0][p] = (i + 0.5)*pos;
+                    r[1][p] = (j + 0.5)*pos;
+                    r[2][p] = (k + 0.5)*pos;
                 }
                 p++;
             }
@@ -396,9 +393,9 @@ double MeanSquaredVelocity() {
     double vSquared = 0.;
     
     for (int i=0; i<N; i++) {
-        double vX = v[i*3];
-        double vY = v[i*3 + 1];
-        double vZ = v[i*3 + 2];
+        double vX = v[0][i];
+        double vY = v[1][i];
+        double vZ = v[2][i];
 
         vSquared += vX*vX + vY*vY + vZ*vZ;
     }
@@ -411,9 +408,9 @@ double Kinetic() { //Write Function here!
     double vSquared = 0.;
 
     for (int i=0; i<N; i++) {
-        double vX = v[i*3];
-        double vY = v[i*3 + 1];
-        double vZ = v[i*3 + 2];
+        double vX = v[0][i];
+        double vY = v[1][i];
+        double vZ = v[2][i];
 
         vSquared += vX*vX + vY*vY + vZ*vZ;
     }
@@ -426,54 +423,55 @@ double Kinetic() { //Write Function here!
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom. 
 void computeAccelsAndPotential() {
-    double f, rSquared, rijX, rijY, rijZ;
     double factor = 8*epsilon;
     double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma, sigma12 = sigma6 * sigma6;
     double term1 = sigma12 * factor, term2 = sigma6 * factor;
     
     for (int i = 0; i < N; i++) {  // set all accelerations to zero
-        a[3*i] = 0;
-        a[3*i + 1] = 0;
-        a[3*i + 2] = 0;
+        for(int k = 0; k < 3; k++){
+            a[k][i] = 0;
+        }
     }
 
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        double aiX = 0.0, aiY = 0.0, aiZ = 0.0, riX = r[3*i], riY = r[3*i + 1], riZ = r[3*i + 2];
-        for (int j = i+1; j < N; j++) {
-            rijX = riX - r[3*j];
-            rijY = riY - r[3*j + 1];
-            rijZ = riZ - r[3*j + 2];
+        double aXi = 0.0, aYi = 0.0, aZi = 0.0;
+        double rXi = r[0][i], rYi = r[1][i], rZi = r[2][i];
 
-            rSquared = rijX*rijX + rijY*rijY + rijZ*rijZ;
-            
-            double r4 = rSquared * rSquared * rSquared * rSquared;
-            double r6 = r4 * rSquared * rSquared;
-            double r7 = r6 * rSquared;
-            double r12 = r6 * r6;
+        for (int j = i+1; j < N; j++) {
+            double rXij = rXi - r[0][j];
+            double rYij = rYi - r[1][j];
+            double rZij = rZi - r[2][j];
+
+            double rSqd = rXij*rXij + rYij*rYij + rZij*rZij;
+
+            double r1Inv = 1 / rSqd;
+            double r4Inv = r1Inv * r1Inv * r1Inv * r1Inv;
+            double r6Inv = r4Inv * r1Inv * r1Inv;
+            double r7Inv = r6Inv * r1Inv;
+            double r12Inv = r6Inv * r6Inv;
 
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            f = (48 / r7) - (24 / r4);
+            double f = (48 * r7Inv) - (24 * r4Inv);
 
             //  from F = ma, where m = 1 in natural units!
-            double fX = rijX * f;
-            double fY = rijY * f;
-            double fZ = rijZ * f;
+            double fX = rXij * f;
+            double fY = rYij * f;
+            double fZ = rZij * f;
 
-            aiX += fX;
-            aiY += fY;
-            aiZ += fZ;
+            aXi += fX;
+            aYi += fY;
+            aZi += fZ;
 
-            a[3*j] -= fX;
-            a[3*j + 1] -= fY;
-            a[3*j + 2] -= fZ;
+            a[0][j] -= fX;
+            a[1][j] -= fY;
+            a[2][j] -= fZ;
 
-            double r6Inv = 1/r6;
-            PE += (term1 * r6Inv * r6Inv) - (term2 * r6Inv);
+            PE += (term1 * r12Inv) - (term2 * r6Inv);
         }
 
-        a[3*i] += aiX;
-        a[3*i + 1] += aiY;
-        a[3*i + 2] += aiZ;
+        a[0][i] += aXi;
+        a[1][i] += aYi;
+        a[2][i] += aZi;
     }
 }
 
@@ -484,13 +482,13 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     
     //  Update positions and velocity with current velocity and acceleration
     for (i=0; i<N; i++) {
-        r[3*i] += dt*(v[i*3] + halfDT*a[3*i]);
-        r[3*i + 1] += dt*(v[i*3 + 1] + halfDT*a[3*i + 1]);
-        r[3*i + 2] += dt*(v[i*3 + 2] + halfDT*a[3*i + 2]);
+        r[0][i] += dt*(v[0][i] + halfDT*a[0][i]);
+        r[1][i] += dt*(v[1][i] + halfDT*a[1][i]);
+        r[2][i] += dt*(v[2][i] + halfDT*a[2][i]);
             
-        v[i*3] += halfDT * a[3*i ];
-        v[i*3 + 1] += halfDT * a[3*i + 1];
-        v[i*3 + 2] += halfDT * a[3*i + 2];
+        v[0][i] += halfDT * a[0][i];
+        v[1][i] += halfDT * a[1][i];
+        v[2][i] += halfDT * a[2][i];
     }
 
     //  Update accellerations from updated positions and potential
@@ -498,21 +496,21 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
 
     //  Update velocity with updated acceleration
     for (i=0; i<N; i++) {
-        v[i*3] += halfDT*a[3*i];
-        v[i*3 + 1] += halfDT*a[3*i + 1];
-        v[i*3 + 2] += halfDT*a[3*i + 2];
+        v[0][i] += halfDT*a[0][i];
+        v[1][i] += halfDT*a[1][i];
+        v[2][i] += halfDT*a[2][i];
     }
     
     // Elastic walls
     for (i=0; i<N; i++) {
         for (j=0; j<3; j++) {
-            if (r[3*i + j]<0.) {
-                v[i*3 + j] *=-1.; //- elastic walls
-                psum += 2*m*fabs(v[i*3 + j])/dt;  // contribution to pressure from "left" walls
+            if (r[j][i]<0.) {
+                v[j][i] *=-1.; //- elastic walls
+                psum += 2*m*fabs(v[j][i])/dt;  // contribution to pressure from "left" walls
             }
-            if (r[3*i + j]>=L) {
-                v[i*3 + j]*=-1.;  //- elastic walls
-                psum += 2*m*fabs(v[i*3 + j])/dt;  // contribution to pressure from "right" walls
+            if (r[j][i]>=L) {
+                v[j][i]*=-1.;  //- elastic walls
+                psum += 2*m*fabs(v[j][i])/dt;  // contribution to pressure from "right" walls
             }
         }
     }
@@ -526,9 +524,9 @@ void initializeVelocities() {
     
     for (i=0; i<N; i++) {
         //  Pull a number from a Gaussian Distribution
-        v[i*3] = gaussdist();
-        v[i*3+1] = gaussdist();
-        v[i*3+2] = gaussdist();
+        v[0][i] = gaussdist();
+        v[1][i] = gaussdist();
+        v[2][i] = gaussdist();
     }
     
     // Vcm = sum_i^N  m*v_i/  sum_i^N  M
@@ -536,9 +534,9 @@ void initializeVelocities() {
     double vCM[3] = {0, 0, 0};
     
     for (i=0; i<N; i++) {
-         vCM[0] += m*v[i*3];
-         vCM[1] += m*v[i*3+1];
-         vCM[2] += m*v[i*3+2];
+         vCM[0] += m*v[0][i];
+         vCM[1] += m*v[1][i];
+         vCM[2] += m*v[2][i];
     }
     
     
@@ -552,9 +550,9 @@ void initializeVelocities() {
     //  center of mass velocity to zero so that the system does
     //  not drift in space!
     for (i=0; i<N; i++) {
-        v[i*3] -= vCM[0];
-        v[i*3+1] -= vCM[1];
-        v[i*3+2] -= vCM[2];
+        v[0][i] -= vCM[0];
+        v[1][i] -= vCM[1];
+        v[2][i] -= vCM[2];
     }
     
     //  Now we want to scale the average velocity of the system
@@ -562,9 +560,9 @@ void initializeVelocities() {
     double vSqdSum, lambda;
     vSqdSum=0.;
     for (i=0; i<N; i++) {
-        double vX = v[i*3];
-        double vY = v[i*3+1];
-        double vZ = v[i*3+2];
+        double vX = v[0][i];
+        double vY = v[1][i];
+        double vZ = v[2][i];
 
         vSqdSum += vX*vX + vY*vY + vZ*vZ;
     }
@@ -572,9 +570,9 @@ void initializeVelocities() {
     lambda = sqrt( 3*(N-1)*Tinit/vSqdSum);
     
     for (i=0; i<N; i++) {
-        v[i*3] *= lambda;
-        v[i*3+1] *= lambda;
-        v[i*3+2] *= lambda;
+        v[0][i] *= lambda;
+        v[1][i] *= lambda;
+        v[2][i] *= lambda;
     }
 }
 
