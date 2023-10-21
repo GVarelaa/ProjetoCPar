@@ -57,6 +57,8 @@ double v[3][MAXPART];
 double a[3][MAXPART];
 
 double PE = 0;
+double mvs = 0;
+double KE = 0;
 
 // atom type
 char atype[10];
@@ -71,14 +73,14 @@ double VelocityVerlet(double dt, int iter, FILE *fp);
 //  solve F = ma for use in Velocity Verlet
 //  Compute total potential energy from particle coordinates
 void computeAccelsAndPotential();
+//  Compute Force using F = -dV/dr
+void computeAccelerations();
 //  Numerical Recipes function for generation gaussian distribution
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
 void initializeVelocities();
-//  Compute mean squared velocity from particle velocities
-double MeanSquaredVelocity();
-//  Compute total kinetic energy from particle mass and velocities
-double Kinetic();
+//  Compute mean squared velocity from particle velocities and total kinetic energy from particle mass and velocities
+void MeanSqdVelocityAndKinetic();
 
 int main()
 {
@@ -87,7 +89,7 @@ int main()
     int i;
     double dt, Vol, Temp, Press, Pavg, Tavg, rho;
     double VolFac, TempFac, PressFac, timefac;
-    double KE, mvs, gc, Z;
+    double gc, Z;
     char trash[10000], prefix[1000], tfn[1000], ofn[1000], afn[1000];
     FILE *infp, *tfp, *ofp, *afp;
     
@@ -266,8 +268,7 @@ int main()
     //  Based on their positions, calculate the ininial intermolecular forces
     //  The accellerations of each particle will be defined from the forces and their
     //  mass, and this will allow us to update their positions via Newton's law
-    computeAccelsAndPotential();
-    
+    computeAccelerations();
     
     // Print number of particles to the trajectory file
     fprintf(tfp,"%i\n",N);
@@ -308,8 +309,7 @@ int main()
         //  Now we would like to calculate somethings about the system:
         //  Instantaneous mean velocity squared, Temperature, Pressure and Kinetic Energy
         //  We would also like to use the IGL to try to see if we can extract the gas constant
-        mvs = MeanSquaredVelocity();
-        KE = Kinetic();
+        MeanSqdVelocityAndKinetic();
         
         // Temperature from Kinetic Theory
         Temp = m*mvs/(3*kB) * TempFac;
@@ -388,8 +388,8 @@ void initialize() {
 }   
 
 
-//  Function to calculate the averaged velocity squared
-double MeanSquaredVelocity() { 
+//  Function to calculate the averaged velocity squared and kinetic energy of the system
+void MeanSqdVelocityAndKinetic() { 
     double vSquared = 0.;
     
     for (int i=0; i<N; i++) {
@@ -400,28 +400,13 @@ double MeanSquaredVelocity() {
         vSquared += vX*vX + vY*vY + vZ*vZ;
     }
     
-    return vSquared/N;
+    mvs = vSquared/N;
+    KE = (m/2.)*vSquared;
 }
-
-//  Function to calculate the kinetic energy of the system
-double Kinetic() { //Write Function here!  
-    double vSquared = 0.;
-
-    for (int i=0; i<N; i++) {
-        double vX = v[0][i];
-        double vY = v[1][i];
-        double vZ = v[2][i];
-
-        vSquared += vX*vX + vY*vY + vZ*vZ;
-    }
-    
-    return (m/2.)*vSquared;
-}
-
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
-//   accelleration of each atom. 
+//   accelleration of each atom.
 void computeAccelsAndPotential() {
     double factor = 8*epsilon;
     double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma, sigma12 = sigma6 * sigma6;
@@ -467,6 +452,54 @@ void computeAccelsAndPotential() {
             a[2][j] -= fZ;
 
             PE += (term1 * r12Inv) - (term2 * r6Inv);
+        }
+
+        a[0][i] += aXi;
+        a[1][i] += aYi;
+        a[2][i] += aZi;
+    }
+}
+
+//   Uses the derivative of the Lennard-Jones potential to calculate
+//   the forces on each atom.  Then uses a = F/m to calculate the
+//   accelleration of each atom. Calculates the potential energy of the system
+void computeAccelerations() {
+    for (int i = 0; i < N; i++) {  // set all accelerations to zero
+        for(int k = 0; k < 3; k++){
+            a[k][i] = 0;
+        }
+    }
+
+    for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
+        double aXi = 0.0, aYi = 0.0, aZi = 0.0;
+        double rXi = r[0][i], rYi = r[1][i], rZi = r[2][i];
+
+        for (int j = i+1; j < N; j++) {
+            double rXij = rXi - r[0][j];
+            double rYij = rYi - r[1][j];
+            double rZij = rZi - r[2][j];
+
+            double rSqd = rXij*rXij + rYij*rYij + rZij*rZij;
+
+            double r1Inv = 1 / rSqd;
+            double r4Inv = r1Inv * r1Inv * r1Inv * r1Inv;
+            double r7Inv = r4Inv * r1Inv * r1Inv * r1Inv;
+
+            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
+            double f = (48 * r7Inv) - (24 * r4Inv);
+
+            //  from F = ma, where m = 1 in natural units!
+            double fX = rXij * f;
+            double fY = rYij * f;
+            double fZ = rZij * f;
+
+            aXi += fX;
+            aYi += fY;
+            aZi += fZ;
+
+            a[0][j] -= fX;
+            a[1][j] -= fY;
+            a[2][j] -= fZ;
         }
 
         a[0][i] += aXi;
