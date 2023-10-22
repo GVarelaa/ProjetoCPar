@@ -27,6 +27,7 @@
 #include<stdlib.h>
 #include<math.h>
 #include<string.h>
+#include <immintrin.h>
 
 
 // Number of particles
@@ -38,6 +39,14 @@ double epsilon = 1.;
 double m = 1.;
 double kB = 1.;
 
+double factor = 8*epsilon;
+double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma;
+double sigma12 = sigma6 * sigma6;
+double term1 = sigma12 * factor;
+double term2 = sigma6 * factor;
+__m256d term1Vec = _mm256_set1_pd(term1);
+__m256d term2Vec = _mm256_set1_pd(term2);
+
 double NA = 6.022140857e23;
 double kBSI = 1.38064852e-23;  // m^2*kg/(s^2*K)
 
@@ -48,7 +57,7 @@ double L;
 double Tinit;  //2;
 //  Vectors!
 //
-const int MAXPART=5001;
+const int MAXPART=5004;
 //  Position
 double r[3][MAXPART];
 //  Velocity
@@ -408,10 +417,8 @@ void MeanSqdVelocityAndKinetic() {
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom.
 void computeAccelsAndPotential() {
-    double factor = 8*epsilon;
-    double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma, sigma12 = sigma6 * sigma6;
-    double term1 = sigma12 * factor, term2 = sigma6 * factor;
-    double potentialAcc = 0;
+    double potentialAcc = 0, values[4];
+    __m256d potentialAccVec = _mm256_setzero_pd();  
     
     for (int i = 0; i < N; i++) {  // set all accelerations to zero
         for(int k = 0; k < 3; k++){
@@ -422,8 +429,12 @@ void computeAccelsAndPotential() {
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         double aXi = 0.0, aYi = 0.0, aZi = 0.0;
         double rXi = r[0][i], rYi = r[1][i], rZi = r[2][i];
+        __m256d aXiVec = _mm256_setzero_pd(), aYiVec = _mm256_setzero_pd(), aZiVec = _mm256_setzero_pd(); 
+        __m256d rXiVec = _mm256_set1_pd(rXi), rYiVec = _mm256_set1_pd(rYi), rZiVec = _mm256_set1_pd(rZi);
 
-        for (int j = i+1; j < N; j++) {
+        // Non Vectorised code
+        int j = i+1;
+        for(; j%4 != 0; j++){
             double rXij = rXi - r[0][j];
             double rYij = rYi - r[1][j];
             double rZij = rZi - r[2][j];
@@ -455,12 +466,69 @@ void computeAccelsAndPotential() {
             potentialAcc += (term1 * rSqd6Inv) - (term2 * rSqd3Inv);
         }
 
-        a[0][i] += aXi;
-        a[1][i] += aYi;
-        a[2][i] += aZi;
+        // Vectorised code
+        for (; j < N; j+=4) {
+            __m256d rXjVec = _mm256_load_pd(&r[0][j]);
+            __m256d rYjVec = _mm256_load_pd(&r[1][j]);
+            __m256d rZjVec = _mm256_load_pd(&r[2][j]);
+
+            __m256d rXijVec = _mm256_sub_pd(rXiVec, rXjVec);
+            __m256d rYijVec = _mm256_sub_pd(rYiVec, rYjVec);
+            __m256d rZijVec = _mm256_sub_pd(rZiVec, rZjVec);
+
+            __m256d rXijSqdVec = _mm256_mul_pd(rXijVec, rXijVec);
+            __m256d rYijSqdVec = _mm256_mul_pd(rYijVec, rYijVec);
+            __m256d rZijSqdVec = _mm256_mul_pd(rZijVec, rZijVec);
+
+            __m256d rSqdVec = _mm256_add_pd(rXijSqdVec, _mm256_add_pd(rYijSqdVec, rZijSqdVec));
+
+            __m256d rSqdInvVec = _mm256_div_pd(_mm256_set1_pd(1.0), rSqdVec);
+            __m256d rSqd3InvVec = _mm256_mul_pd(rSqdInvVec, _mm256_mul_pd(rSqdInvVec, rSqdInvVec));
+            __m256d rSqd4InvVec = _mm256_mul_pd(rSqdInvVec, rSqd3InvVec);
+            __m256d rSqd6InvVec = _mm256_mul_pd(rSqd3InvVec, rSqd3InvVec);
+            __m256d rSqd7InvVec = _mm256_mul_pd(rSqd6InvVec, rSqdInvVec);
+
+            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
+            __m256d fVec = _mm256_sub_pd(_mm256_mul_pd(_mm256_set1_pd(48.0f), rSqd7InvVec), 
+                                         _mm256_mul_pd(_mm256_set1_pd(24.0f), rSqd4InvVec));
+
+            //  from F = ma, where m = 1 in natural units!
+            __m256d fXVec = _mm256_mul_pd(rXijVec, fVec);//rijX * f;
+            __m256d fYVec = _mm256_mul_pd(rYijVec, fVec);
+            __m256d fZVec = _mm256_mul_pd(rZijVec, fVec);
+
+            aXiVec = _mm256_add_pd(aXiVec, fXVec);
+            aYiVec = _mm256_add_pd(aYiVec, fYVec);
+            aZiVec = _mm256_add_pd(aZiVec, fZVec);
+
+
+            __m256d aXjVec = _mm256_load_pd(&a[0][j]);
+            __m256d aYjVec = _mm256_load_pd(&a[1][j]);
+            __m256d aZjVec = _mm256_load_pd(&a[2][j]);
+
+            __m256d diffXVec = _mm256_sub_pd(aXjVec, fXVec);
+            __m256d diffYVec = _mm256_sub_pd(aYjVec, fYVec);
+            __m256d diffZVec = _mm256_sub_pd(aZjVec, fZVec);
+
+            _mm256_store_pd(&a[0][j], diffXVec);
+            _mm256_store_pd(&a[1][j], diffYVec);
+            _mm256_store_pd(&a[2][j], diffZVec);
+
+            potentialAccVec = _mm256_add_pd(potentialAccVec, _mm256_sub_pd(_mm256_mul_pd(term1Vec, rSqd6InvVec) , _mm256_mul_pd(term2Vec, rSqd3InvVec)));
+        }
+
+        _mm256_storeu_pd(values, aXiVec);
+        a[0][i] += aXi + values[0] + values[1] + values[2] + values[3];
+
+        _mm256_storeu_pd(values, aYiVec);
+        a[1][i] += aYi + values[0] + values[1] + values[2] + values[3];
+
+        _mm256_storeu_pd(values, aZiVec);
+        a[2][i] += aZi + values[0] + values[1] + values[2] + values[3];
     }
 
-    PE = potentialAcc;
+    _mm256_storeu_pd(values, potentialAccVec);
+    PE = potentialAcc + values[0] + values[1] + values[2] + values[3];
 }
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
