@@ -411,6 +411,7 @@ void computeAccelsAndPotential() {
     double factor = 8*epsilon;
     double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma, sigma12 = sigma6 * sigma6;
     double term1 = sigma12 * factor, term2 = sigma6 * factor;
+    double potentialAcc = 0;
     
     for (int i = 0; i < N; i++) {  // set all accelerations to zero
         for(int k = 0; k < 3; k++){
@@ -429,14 +430,14 @@ void computeAccelsAndPotential() {
 
             double rSqd = rXij*rXij + rYij*rYij + rZij*rZij;
 
-            double r1Inv = 1 / rSqd;
-            double r4Inv = r1Inv * r1Inv * r1Inv * r1Inv;
-            double r6Inv = r4Inv * r1Inv * r1Inv;
-            double r7Inv = r6Inv * r1Inv;
-            double r12Inv = r6Inv * r6Inv;
+            double rSqdInv = 1 / rSqd;
+            double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
+            double rSqd4Inv = rSqdInv * rSqd3Inv;
+            double rSqd6Inv = rSqd3Inv * rSqd3Inv;
+            double rSqd7Inv = rSqd6Inv * rSqdInv;
 
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            double f = (48 * r7Inv) - (24 * r4Inv);
+            double f = (48 * rSqd7Inv) - (24 * rSqd4Inv);
 
             //  from F = ma, where m = 1 in natural units!
             double fX = rXij * f;
@@ -451,13 +452,15 @@ void computeAccelsAndPotential() {
             a[1][j] -= fY;
             a[2][j] -= fZ;
 
-            PE += (term1 * r12Inv) - (term2 * r6Inv);
+            potentialAcc += (term1 * rSqd6Inv) - (term2 * rSqd3Inv);
         }
 
         a[0][i] += aXi;
         a[1][i] += aYi;
         a[2][i] += aZi;
     }
+
+    PE = potentialAcc;
 }
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
