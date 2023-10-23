@@ -353,7 +353,7 @@ int main()
     printf("\n  PV/nT (J * mol^-1 K^-1):                 %15.5f\n",gc);
     printf("\n  PERCENT ERROR of pV/nT AND GAS CONSTANT: %15.5f\n",100*fabs(gc-8.3144598)/8.3144598);
     printf("\n  THE COMPRESSIBILITY (unitless):          %15.5f \n",Z);
-    printf("\n  TOTAL VOLUME (m^3):                      %10.5e \n",Vol*VolFac);
+    printf("\n  TOTAL VOLUME (m^3):                      %10.5e \n",Volume);
     printf("\n  NUMBER OF PARTICLES (unitless):          %i \n", N);
     
     
