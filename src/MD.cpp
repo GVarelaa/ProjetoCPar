@@ -445,10 +445,9 @@ void computeAccelsAndPotential() {
             double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
             double rSqd4Inv = rSqdInv * rSqd3Inv;
             double rSqd6Inv = rSqd3Inv * rSqd3Inv;
-            double rSqd7Inv = rSqd6Inv * rSqdInv;
 
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            double f = (48 * rSqd7Inv) - (24 * rSqd4Inv);
+            double f = rSqd4Inv * (48 * rSqd3Inv - 24);
 
             //  from F = ma, where m = 1 in natural units!
             double fX = rXij * f;
@@ -486,11 +485,11 @@ void computeAccelsAndPotential() {
             __m256d rSqd3InvVec = _mm256_mul_pd(rSqdInvVec, _mm256_mul_pd(rSqdInvVec, rSqdInvVec));
             __m256d rSqd4InvVec = _mm256_mul_pd(rSqdInvVec, rSqd3InvVec);
             __m256d rSqd6InvVec = _mm256_mul_pd(rSqd3InvVec, rSqd3InvVec);
-            __m256d rSqd7InvVec = _mm256_mul_pd(rSqd6InvVec, rSqdInvVec);
 
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            __m256d fVec = _mm256_sub_pd(_mm256_mul_pd(_mm256_set1_pd(48.0f), rSqd7InvVec), 
-                                         _mm256_mul_pd(_mm256_set1_pd(24.0f), rSqd4InvVec));
+            __m256d fVec = _mm256_mul_pd(rSqd4InvVec, 
+                                         _mm256_sub_pd(_mm256_mul_pd(rSqd3InvVec, _mm256_set1_pd(48.0)),
+                                                       _mm256_set1_pd(24.0)));
 
             //  from F = ma, where m = 1 in natural units!
             __m256d fXVec = _mm256_mul_pd(rXijVec, fVec);//rijX * f;
@@ -553,11 +552,11 @@ void computeAccelerations() {
             double rSqd = rXij*rXij + rYij*rYij + rZij*rZij;
 
             double r1Inv = 1 / rSqd;
-            double r4Inv = r1Inv * r1Inv * r1Inv * r1Inv;
-            double r7Inv = r4Inv * r1Inv * r1Inv * r1Inv;
+            double r3Inv = r1Inv * r1Inv * r1Inv;
+            double r4Inv = r3Inv * r1Inv;
 
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            double f = (48 * r7Inv) - (24 * r4Inv);
+            double f = r4Inv * (48 * r3Inv - 24);
 
             //  from F = ma, where m = 1 in natural units!
             double fX = rXij * f;
