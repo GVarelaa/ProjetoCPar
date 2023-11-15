@@ -27,6 +27,7 @@
 #include<stdlib.h>
 #include<math.h>
 #include<string.h>
+#include <omp.h>
 
 // Number of particles
 int N;
@@ -414,8 +415,8 @@ void MeanSqdVelocityAndKinetic() {
 //   accelleration of each atom.
 void computeAccelsAndPotential() {
     double potentialAcc = 0, values[4];
-    //double sub[N][3][N];
-    //double add[3][N];
+    double sub[N][3*N];
+    double add[3][N];
     
     for (int i = 0; i < N; i++) {  // set all accelerations to zero
         for(int k = 0; k < 3; k++){
@@ -423,12 +424,10 @@ void computeAccelsAndPotential() {
         }
     }
     
-
-    #pragma omp parallel for reduction(+:potentialAcc) schedule(dynamic)
+    //#pragma omp parallel for reduction(+:potentialAcc) schedule(dynamic)
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         double aXi = 0.0, aYi = 0.0, aZi = 0.0;
         double rXi = r[0][i], rYi = r[1][i], rZi = r[2][i];
-        double sub[3][N];
 
         // Non Vectorised code
         for(int j = i+1; j < N; j++){
@@ -455,24 +454,26 @@ void computeAccelsAndPotential() {
             aYi += fY;
             aZi += fZ;
 
-            sub[0][j] = fX;
-            sub[1][j] = fY;
-            sub[2][j] = fZ;
+            sub[0][0] = fX;
+            sub[0][1] = fY;
+            sub[0][2] = fZ;
 
             potentialAcc += (term1 * rSqd6Inv) - (term2 * rSqd3Inv);
         }
 
-        #pragma omp critical
-        {
-            a[0][i] += aXi;
-            a[1][i] += aYi;
-            a[2][i] += aZi;
+        add[0][i] = aXi;
+        add[1][i] = aYi;
+        add[2][i] = aZi;
+    }
 
-            for(int j = i+1; j < N; j++){
-                a[0][j] -= sub[0][j];
-                a[1][j] -= sub[1][j];
-                a[2][j] -= sub[2][j];
-            }
+    for (int i = 0; i < N-1; i++){
+        a[0][i] += add[0][i];
+        a[1][i] += add[1][i];
+        a[2][i] += add[2][i];
+        for(int j = i+1; j < N; j++){
+            a[0][j] -= sub[i][3*j];
+            a[1][j] -= sub[i][3*j + 1];
+            a[2][j] -= sub[i][3*j + 2];
         }
     }
 
