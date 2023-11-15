@@ -30,6 +30,7 @@
 #include <immintrin.h>
 #include <omp.h>
 
+
 // Number of particles
 int N;
 
@@ -426,6 +427,7 @@ void computeAccelsAndPotential() {
         }
     }
 
+    #pragma omp parallel for reduction(+:potentialAcc) schedule(dynamic)
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         double aXi = 0.0, aYi = 0.0, aZi = 0.0;
         double rXi = r[0][i], rYi = r[1][i], rZi = r[2][i];
@@ -462,6 +464,7 @@ void computeAccelsAndPotential() {
             a[1][j] -= fY;
             a[2][j] -= fZ;
 
+            #pragma omp atomic
             potentialAcc += (term1 * rSqd6Inv) - (term2 * rSqd3Inv);
         }
 
@@ -527,6 +530,7 @@ void computeAccelsAndPotential() {
     }
 
     _mm256_storeu_pd(values, potentialAccVec);
+
     PE = potentialAcc + values[0] + values[1] + values[2] + values[3];
 }
 
