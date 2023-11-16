@@ -27,8 +27,8 @@
 #include<stdlib.h>
 #include<math.h>
 #include<string.h>
-#include <immintrin.h>
 #include<omp.h>
+#include<unistd.h>
 
 // Number of particles
 int N;
@@ -39,11 +39,6 @@ double epsilon = 1.;
 double m = 1.;
 double kB = 1.;
 
-double factor = 8*epsilon;
-double sigma6 = sigma * sigma * sigma * sigma * sigma * sigma;
-double sigma12 = sigma6 * sigma6;
-double term1 = sigma12 * factor;
-double term2 = sigma6 * factor;
 
 double NA = 6.022140857e23;
 double kBSI = 1.38064852e-23;  // m^2*kg/(s^2*K)
@@ -55,13 +50,13 @@ double L;
 double Tinit;  //2;
 //  Vectors!
 //
-const int MAXPART=5001;
+const int MAXPART=5004;
 //  Position
-double r[3][MAXPART];
+double r[3][MAXPART] __attribute__((aligned(32)));
 //  Velocity
-double v[3][MAXPART];
+double v[3][MAXPART] __attribute__((aligned(32)));
 //  Acceleration
-double a[3][MAXPART];
+double a[3][MAXPART] __attribute__((aligned(32)));
 
 double PE = 0;
 double mvs = 0;
@@ -415,7 +410,6 @@ void MeanSqdVelocityAndKinetic() {
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom.
 void computeAccelsAndPotential() {
-    double potentialAcc = 0, values[4];
     int numThreads;
 
     #pragma omp parallel
@@ -424,6 +418,7 @@ void computeAccelsAndPotential() {
     }
 
     double *aux[numThreads];
+    double potentialAcc = 0;
     
     for (int i = 0; i < N; i++) {  // set all accelerations to zero
         for(int k = 0; k < 3; k++){
@@ -436,56 +431,50 @@ void computeAccelsAndPotential() {
     }
 
 
-    #pragma omp parallel for reduction(+:potentialAcc)
+    #pragma omp parallel for reduction(+:potentialAcc) schedule(dynamic)
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         int threadId = omp_get_thread_num();
-        double aXi = 0.0, aYi = 0.0, aZi = 0.0;
-        double rXi = r[0][i], rYi = r[1][i], rZi = r[2][i];
+        double accum[3] = {0, 0, 0};
 
         // Non Vectorised code
         for(int j = i+1; j < N; j++){
-            double rXij = rXi - r[0][j];
-            double rYij = rYi - r[1][j];
-            double rZij = rZi - r[2][j];
+            double rSqd = 0.0;
+            double rij[3];
 
-            double rSqd = rXij*rXij + rYij*rYij + rZij*rZij;
+            for(int k = 0; k < 3; k++){
+                rij[k] = r[k][i] - r[k][j];
+                rSqd += rij[k] * rij[k];
+            }
 
             double rSqdInv = 1 / rSqd;
             double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
             double rSqd4Inv = rSqdInv * rSqd3Inv;
 
-            potentialAcc += rSqd3Inv * ((term1 * rSqd3Inv) - term2);
+            potentialAcc += rSqd3Inv * (rSqd3Inv - 1);
 
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             double f = rSqd4Inv * (48 * rSqd3Inv - 24);
 
-            //  from F = ma, where m = 1 in natural units!
-            double fX = rXij * f;
-            double fY = rYij * f;
-            double fZ = rZij * f;
-
-            aXi += fX;
-            aYi += fY;
-            aZi += fZ;
-            
-            aux[threadId][j] -= fX;
-            aux[threadId][N + j] -= fY;
-            aux[threadId][N*2 + j] -= fZ;
+            for(int k = 0; k < 3; k++){
+                double op = rij[k] * f;
+                accum[k] += op;
+                aux[threadId][k*N + j] -= op;
+            }
         }
 
-        aux[threadId][i] += aXi;
-        aux[threadId][N + i] += aYi;
-        aux[threadId][N*2 + i] += aZi;
+        for(int k = 0; k < 3; k++){
+            aux[threadId][k*N + i] += accum[k];
+        }
     }
 
     // Update accelaration
-    /*for(int i = 0; i < N; i++){
+    for(int i = 0; i < N; i++){
         for(int j = 0; j < numThreads; j++){
-            a[0][i] += aux[j][i];
-            a[1][i] += aux[j][N + i];
-            a[2][i] += aux[j][N*2 + i];
+            for(int k = 0; k < 3; k++){
+                a[k][i] += aux[j][k*N + i];
+            }
         }
-    }*/
+    }
 
     for(int i = 0; i < numThreads; i++){
         free(aux[i]);
@@ -493,6 +482,7 @@ void computeAccelsAndPotential() {
 
     PE = potentialAcc;
 }
+
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
@@ -541,6 +531,7 @@ void computeAccelerations() {
         a[2][i] += aZi;
     }
 }
+
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
 double VelocityVerlet(double dt, int iter, FILE *fp) {

@@ -1,6 +1,6 @@
 CC = gcc
 SRC = src/
-CFLAGS = -Ofast -ftree-vectorize -mavx
+CFLAGS = -Ofast -mavx
 
 .DEFAULT_GOAL = all
 
@@ -12,7 +12,7 @@ MDseq.exe: $(SRC)/MDseq.cpp
 
 MDpar.exe: $(SRC)/MDpar.cpp
 	module load gcc/11.2.0;
-	$(CC) $(CFLAGS) $(SRC)MDpar.cpp -lm -fopenmp -o MDpar.exe
+	$(CC) $(CFLAGS) $(SRC)MDpar.cpp -lm -fopenmp -ftree-vectorize -o MDpar.exe
 
 
 clean:
