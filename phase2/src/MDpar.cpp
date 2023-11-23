@@ -410,32 +410,19 @@ void MeanSqdVelocityAndKinetic() {
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom.
 void computeAccelsAndPotential() {
-    int numThreads;
-
-    #pragma omp parallel
-    {
-        numThreads = omp_get_num_threads();
-    }
-
-    double *aux[numThreads];
-    double potentialAcc = 0;
+    double potentialAcc = 0, accelerations[3*N];
     
     for (int i = 0; i < N; i++) {  // set all accelerations to zero
         for(int k = 0; k < 3; k++){
             a[k][i] = 0;
+            accelerations[k*N + i] = 0;
         }
     }
 
-    for(int i = 0; i < numThreads; i++){
-        aux[i] = (double*) calloc(3*N, sizeof(double));
-    }
 
-
-    #pragma omp parallel for reduction(+:potentialAcc) schedule(dynamic)
+    #pragma omp parallel for reduction(+:potentialAcc) reduction(+:accelerations) schedule(dynamic)
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        int threadId = omp_get_thread_num();
-        double accum[3] = {0, 0, 0};
-
+        double accelAccum[3] = {0.0, 0.0, 0.0};
         // Non Vectorised code
         for(int j = i+1; j < N; j++){
             double rSqd = 0.0;
@@ -450,34 +437,28 @@ void computeAccelsAndPotential() {
             double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
             double rSqd4Inv = rSqdInv * rSqd3Inv;
 
-            potentialAcc += rSqd3Inv * (rSqd3Inv - 1);
+            potentialAcc += 8 * rSqd3Inv * (rSqd3Inv - 1);
 
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             double f = rSqd4Inv * (48 * rSqd3Inv - 24);
 
             for(int k = 0; k < 3; k++){
-                double op = rij[k] * f;
-                accum[k] += op;
-                aux[threadId][k*N + j] -= op;
+                double fK = rij[k] * f;
+                accelAccum[k] += fK;
+                accelerations[k*N + j] += -fK;
             }
         }
 
         for(int k = 0; k < 3; k++){
-            aux[threadId][k*N + i] += accum[k];
+            accelerations[k*N + i] += accelAccum[k];
         }
     }
 
-    // Update accelaration
+
     for(int i = 0; i < N; i++){
-        for(int j = 0; j < numThreads; j++){
-            for(int k = 0; k < 3; k++){
-                a[k][i] += aux[j][k*N + i];
-            }
+        for(int k = 0; k < 3; k++){
+            a[k][i] += accelerations[k*N + i];
         }
-    }
-
-    for(int i = 0; i < numThreads; i++){
-        free(aux[i]);
     }
 
     PE = potentialAcc;
