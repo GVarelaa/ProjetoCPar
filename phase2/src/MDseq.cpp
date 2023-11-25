@@ -28,7 +28,7 @@
 #include<math.h>
 #include<string.h>
 #include <immintrin.h>
-
+#include<unistd.h>
 
 // Number of particles
 int N;
@@ -51,11 +51,11 @@ double Tinit;  //2;
 //
 const int MAXPART=5004;
 //  Position
-double r[3][MAXPART];
+double r[3][MAXPART] __attribute__((aligned(32)));
 //  Velocity
-double v[3][MAXPART];
+double v[3][MAXPART] __attribute__((aligned(32)));
 //  Acceleration
-double a[3][MAXPART];
+double a[3][MAXPART] __attribute__((aligned(32)));
 
 double PE = 0;
 double mvs = 0;
@@ -213,7 +213,7 @@ int main()
     
     scanf("%lf",&rho);
     
-    N = 10*216;
+    N = 5000;
     Vol = N/(rho*NA);
     
     Vol /= VolFac;
