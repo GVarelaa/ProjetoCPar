@@ -420,7 +420,7 @@ void computeAccelsAndPotential() {
     }
 
 
-    #pragma omp parallel for reduction(+:potentialAcc, accelarations) schedule(dynamic)
+    #pragma omp parallel for reduction(+:potentialAcc, accelerations) schedule(dynamic)
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
         double accelAccum[3] = {0.0, 0.0, 0.0};
         // Non Vectorised code
