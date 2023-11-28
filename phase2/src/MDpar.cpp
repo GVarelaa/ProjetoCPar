@@ -422,13 +422,13 @@ void computeAccelsAndPotential() {
         double accelAcc [3] = {0.0, 0.0, 0.0};
         // Non Vectorised code
         for(int j = i+1; j < N; j++){
-            double rSqd = 0.0, rij[3];
+            double rij[3];
 
             for(int k = 0; k < 3; k++){
                 rij[k] = r[k][i] - r[k][j];
-                rSqd += rij[k] * rij[k];
             }
 
+            double rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
             double rSqdInv = 1 / rSqd;
             double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
             double rSqd4Inv = rSqdInv * rSqd3Inv;
@@ -440,6 +440,7 @@ void computeAccelsAndPotential() {
 
             for(int k = 0; k < 3; k++){
                 double fK = rij[k] * f;
+
                 accelAcc[k] += fK;
                 a[k][j] += -fK;
             }
