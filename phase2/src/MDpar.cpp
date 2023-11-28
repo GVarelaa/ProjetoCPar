@@ -422,7 +422,7 @@ void computeAccelsAndPotential() {
         double accelAcc [3] = {0.0, 0.0, 0.0};
         // Non Vectorised code
         for(int j = i+1; j < N; j++){
-            double rSqd = 0.0;, rij[3];
+            double rSqd = 0.0, rij[3];
 
             for(int k = 0; k < 3; k++){
                 rij[k] = r[k][i] - r[k][j];
