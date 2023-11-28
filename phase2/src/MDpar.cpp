@@ -76,7 +76,6 @@ double VelocityVerlet(double dt, int iter, FILE *fp);
 //  Compute total potential energy from particle coordinates
 void computeAccelsAndPotential();
 //  Compute Force using F = -dV/dr
-void computeAccelerations();
 //  Numerical Recipes function for generation gaussian distribution
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
@@ -270,7 +269,7 @@ int main()
     //  Based on their positions, calculate the ininial intermolecular forces
     //  The accellerations of each particle will be defined from the forces and their
     //  mass, and this will allow us to update their positions via Newton's law
-    computeAccelerations();
+    computeAccelsAndPotential();
     
     // Print number of particles to the trajectory file
     fprintf(tfp,"%i\n",N);
@@ -462,55 +461,6 @@ void computeAccelsAndPotential() {
     }
 
     PE = potentialAcc;
-}
-
-
-//   Uses the derivative of the Lennard-Jones potential to calculate
-//   the forces on each atom.  Then uses a = F/m to calculate the
-//   accelleration of each atom. Calculates the potential energy of the system
-void computeAccelerations() {
-    for (int i = 0; i < N; i++) {  // set all accelerations to zero
-        for(int k = 0; k < 3; k++){
-            a[k][i] = 0;
-        }
-    }
-
-    for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        double aXi = 0.0, aYi = 0.0, aZi = 0.0;
-        double rXi = r[0][i], rYi = r[1][i], rZi = r[2][i];
-
-        for (int j = i+1; j < N; j++) {
-            double rXij = rXi - r[0][j];
-            double rYij = rYi - r[1][j];
-            double rZij = rZi - r[2][j];
-
-            double rSqd = rXij*rXij + rYij*rYij + rZij*rZij;
-
-            double r1Inv = 1 / rSqd;
-            double r3Inv = r1Inv * r1Inv * r1Inv;
-            double r4Inv = r3Inv * r1Inv;
-
-            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            double f = r4Inv * (48 * r3Inv - 24);
-
-            //  from F = ma, where m = 1 in natural units!
-            double fX = rXij * f;
-            double fY = rYij * f;
-            double fZ = rZij * f;
-
-            aXi += fX;
-            aYi += fY;
-            aZi += fZ;
-
-            a[0][j] -= fX;
-            a[1][j] -= fY;
-            a[2][j] -= fZ;
-        }
-
-        a[0][i] += aXi;
-        a[1][i] += aYi;
-        a[2][i] += aZi;
-    }
 }
 
 
