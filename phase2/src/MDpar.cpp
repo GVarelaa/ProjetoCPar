@@ -409,23 +409,20 @@ void MeanSqdVelocityAndKinetic() {
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom.
 void computeAccelsAndPotential() {
-    double potentialAcc = 0, accelerations[3*N];
+    double potentialAcc = 0;
     
     for (int i = 0; i < N; i++) {  // set all accelerations to zero
         for(int k = 0; k < 3; k++){
             a[k][i] = 0;
-            accelerations[k*N + i] = 0;
         }
     }
 
-
-    #pragma omp parallel for reduction(+:potentialAcc, accelerations) schedule(dynamic)
+    #pragma omp parallel for reduction(+:potentialAcc, a) schedule(dynamic)
     for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        double accelAccum[3] = {0.0, 0.0, 0.0};
+        double accelAcc [3] = {0.0, 0.0, 0.0};
         // Non Vectorised code
         for(int j = i+1; j < N; j++){
-            double rSqd = 0.0;
-            double rij[3];
+            double rSqd = 0.0;, rij[3];
 
             for(int k = 0; k < 3; k++){
                 rij[k] = r[k][i] - r[k][j];
@@ -443,22 +440,15 @@ void computeAccelsAndPotential() {
 
             for(int k = 0; k < 3; k++){
                 double fK = rij[k] * f;
-                accelAccum[k] += fK;
-                accelerations[k*N + j] += -fK;
+                accelAcc[k] += fK;
             }
         }
 
         for(int k = 0; k < 3; k++){
-            accelerations[k*N + i] += accelAccum[k];
+            a[k][i] += accelAcc[k];
         }
     }
 
-
-    for(int i = 0; i < N; i++){
-        for(int k = 0; k < 3; k++){
-            a[k][i] += accelerations[k*N + i];
-        }
-    }
 
     PE = potentialAcc;
 }
