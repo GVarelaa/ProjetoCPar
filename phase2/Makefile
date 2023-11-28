@@ -17,10 +17,12 @@ MDpar.exe: $(SRC)/MDpar.cpp
 
 clean:
 	rm ./MD*.exe
+
 runseq: MDseq.exe
 	./MDseq.exe < inputdata.txt
 
 runpar: MDpar.exe
+	export OMP_NUM_THREADS=2;\
 	./MDpar.exe < inputdata.txt
 
 
