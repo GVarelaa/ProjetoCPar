@@ -441,6 +441,7 @@ void computeAccelsAndPotential() {
             for(int k = 0; k < 3; k++){
                 double fK = rij[k] * f;
                 accelAcc[k] += fK;
+                a[k][j] += -fK;
             }
         }
 
