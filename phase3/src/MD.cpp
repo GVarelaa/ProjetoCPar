@@ -29,6 +29,7 @@
 #include<string.h>
 #include<unistd.h>
 
+
 // Number of particles
 int N;
 
@@ -404,51 +405,124 @@ void MeanSqdVelocityAndKinetic() {
     KE = (m/2.)*vSquared;
 }
 
+__device__ double atomicAddDouble(double* address, double val) {
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
+
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed,
+                __double_as_longlong(val + __longlong_as_double(assumed)));
+    } while (assumed != old);
+
+    return __longlong_as_double(old);
+}
+
+
+__global__ void stencilKernel(double *d_ax, double *d_ay, double *d_az
+                            , double *d_rx, double *d_ry, double *d_rz, double *d_potential, int N) {
+    
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= N) return;
+    
+    double accelAcc[3] = {0.0, 0.0, 0.0};
+    double potential = 0.0;
+
+    for (int j = idx+1; j < N; j++) {
+        double rij[3];
+        rij[0] = d_rx[idx] - d_rx[j];
+        rij[1] = d_ry[idx] - d_ry[j];
+        rij[2] = d_rz[idx] - d_rz[j];
+
+        double rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
+        double rSqdInv = 1 / rSqd;
+        double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
+        double rSqd4Inv = rSqdInv * rSqd3Inv;
+
+        potential += 8 * rSqd3Inv * (rSqd3Inv - 1);
+
+        // From derivative of Lennard-Jones with sigma and epsilon set equal to 1
+        double f = rSqd4Inv * (48 * rSqd3Inv - 24);
+        
+        double fKx = rij[0] * f;
+        double fKy = rij[1] * f;
+        double fKz = rij[2] * f;
+
+        accelAcc[0] += fKx;
+        accelAcc[1] += fKy;
+        accelAcc[2] += fKz;
+
+        atomicAddDouble(&d_ax[j], -fKx);
+        atomicAddDouble(&d_ay[j], -fKy);
+        atomicAddDouble(&d_az[j], -fKz);
+    }
+
+    d_ax[idx] = accelAcc[0];
+    d_ay[idx] = accelAcc[1];
+    d_az[idx] = accelAcc[2];
+
+    d_potential[idx] = potential;
+
+    //atomicAdd(d_PE, potential);
+}
+
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom.
 void computeAccelsAndPotential() {
-    double potentialAcc = 0;
+    double *d_ax, *d_ay, *d_az; 
+    double *d_rx, *d_ry, *d_rz;
+    double *d_potential;
+    double potential[N];
+
+    int bytes = sizeof(double) * N;
+
+    cudaMalloc(&d_potential, bytes);
     
-    for (int i = 0; i < N; i++) {  // set all accelerations to zero
-        for(int k = 0; k < 3; k++){
-            a[k][i] = 0;
-        }
+    cudaMalloc(&d_ax, bytes);
+    cudaMalloc(&d_ay, bytes);
+    cudaMalloc(&d_az, bytes);
+
+    cudaMalloc(&d_rx, bytes);
+    cudaMalloc(&d_ry, bytes);
+    cudaMalloc(&d_rz, bytes);
+    //checkCUDAError("mem allocation");
+
+    cudaMemcpy (d_rx, r[0], bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy (d_ry, r[1], bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy (d_rz, r[2], bytes, cudaMemcpyHostToDevice);
+    //checkCUDAError("memcpy h->d");
+
+    cudaMemset(potential, 0, bytes);
+    cudaMemset(d_ax, 0, bytes);
+    cudaMemset(d_ay, 0, bytes);
+    cudaMemset(d_az, 0, bytes);
+
+    // Lançamento do kernel
+    int threadsPerBlock = 256;
+    int blocks = 20;
+    stencilKernel <<< threadsPerBlock, blocks >>> (d_ax, d_ay, d_az, d_rx, d_ry, d_rz, d_potential, N);
+    //checkCUDAError("kernel invocation");
+
+    cudaMemcpy(a[0], d_ax, bytes, cudaMemcpyDeviceToHost);
+    cudaMemcpy(a[1], d_ay, bytes, cudaMemcpyDeviceToHost);
+    cudaMemcpy(a[2], d_az, bytes, cudaMemcpyDeviceToHost);
+    cudaMemcpy(potential, d_potential, bytes, cudaMemcpyDeviceToHost);
+    //checkCUDAError("memcpy d->h");
+
+    cudaFree(d_ax);
+    cudaFree(d_ay);
+    cudaFree(d_az);
+    cudaFree(d_rx);
+    cudaFree(d_ry);
+    cudaFree(d_rz);
+    cudaFree(d_potential);
+	//checkCUDAError("mem free");
+
+    double potentialAcc = 0;
+    for(int i = 0; i < N; i++){
+        potentialAcc += potential[i];
     }
-
-    for (int i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        double accelAcc [3] = {0.0, 0.0, 0.0};
-        // Non Vectorised code
-        for(int j = i+1; j < N; j++){
-            double rij[3];
-
-            for(int k = 0; k < 3; k++){
-                rij[k] = r[k][i] - r[k][j];
-            }
-
-            double rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
-            double rSqdInv = 1 / rSqd;
-            double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
-            double rSqd4Inv = rSqdInv * rSqd3Inv;
-
-            potentialAcc += 8 * rSqd3Inv * (rSqd3Inv - 1);
-
-            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            double f = rSqd4Inv * (48 * rSqd3Inv - 24);
-
-            for(int k = 0; k < 3; k++){
-                double fK = rij[k] * f;
-
-                accelAcc[k] += fK;
-                a[k][j] += -fK;
-            }
-        }
-
-        for(int k = 0; k < 3; k++){
-            a[k][i] += accelAcc[k];
-        }
-    }
-
 
     PE = potentialAcc;
 }
