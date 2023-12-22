@@ -28,17 +28,21 @@
 #include<math.h>
 #include<string.h>
 #include<unistd.h>
+#include"MD.h"
 #include<cuda_runtime.h>
 
-
 // Number of particles
-int N;
+const int N=5000;
+
+#define NUM_THREADS_PER_BLOCK 256
+#define NUM_BLOCKS ((N + NUM_THREADS_PER_BLOCK - 1) / NUM_THREADS_PER_BLOCK)
+#define MAXPART NUM_BLOCKS*NUM_THREADS_PER_BLOCK
 
 //  Lennard-Jones parameters in natural units!
 double sigma = 1.;
 double epsilon = 1.;
-double m = 1.;
-double kB = 1.;
+double m = 1.0;
+double kB = 1.0;
 
 
 double NA = 6.022140857e23;
@@ -50,14 +54,12 @@ double L;
 //  Initial Temperature in Natural Units
 double Tinit;  //2;
 //  Vectors!
-//
-const int MAXPART=5004;
 //  Position
-double r[3][MAXPART];
+double r[3*MAXPART];
 //  Velocity
-double v[3][MAXPART];
+double v[3*MAXPART];
 //  Acceleration
-double a[3][MAXPART];
+double a[3*MAXPART];
 
 double PE = 0;
 double mvs = 0;
@@ -92,8 +94,8 @@ int main()
     double dt, Vol, Temp, Press, Pavg, Tavg, rho;
     double VolFac, TempFac, PressFac, timefac;
     double gc, Z;
-    char prefix[1000], tfn[1000], ofn[1000], afn[1000];
-    FILE *tfp, *ofp, *afp;
+    char trash[10000], prefix[1000], tfn[1000], ofn[1000], afn[1000];
+    FILE *infp, *tfp, *ofp, *afp;
     
     
     printf("\n  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
@@ -213,8 +215,7 @@ int main()
     printf("  NUMBER DENSITY OF LIQUID ARGON AT 1 ATM AND 87 K IS ABOUT 35000 moles/m^3\n");
     
     scanf("%lf",&rho);
-    
-    N = 5000;//10*216;
+
     Vol = N/(rho*NA);
     
     Vol /= VolFac;
@@ -336,17 +337,17 @@ int main()
     gc = NA*Pavg*Volume/(N*Tavg);
     fprintf(afp,"  Total Time (s)      T (K)               P (Pa)      PV/nT (J/(mol K))         Z           V (m^3)              N\n");
     fprintf(afp," --------------   -----------        ---------------   --------------   ---------------   ------------   -----------\n");
-    fprintf(afp,"  %8.4e  %15.5f       %15.5f     %10.5f       %10.5f        %10.5e         %i\n",i*dt*timefac,Tavg,Pavg,gc,Z,Vol*VolFac,N);
+    fprintf(afp,"  %8.12e  %15.12f       %15.12f     %10.12f       %10.12f        %10.12e         %i\n",i*dt*timefac,Tavg,Pavg,gc,Z,Vol*VolFac,N);
     
     printf("\n  TO ANIMATE YOUR SIMULATION, OPEN THE FILE \n  '%s' WITH VMD AFTER THE SIMULATION COMPLETES\n",tfn);
     printf("\n  TO ANALYZE INSTANTANEOUS DATA ABOUT YOUR MOLECULE, OPEN THE FILE \n  '%s' WITH YOUR FAVORITE TEXT EDITOR OR IMPORT THE DATA INTO EXCEL\n",ofn);
     printf("\n  THE FOLLOWING THERMODYNAMIC AVERAGES WILL BE COMPUTED AND WRITTEN TO THE FILE  \n  '%s':\n",afn);
-    printf("\n  AVERAGE TEMPERATURE (K):                 %15.5f\n",Tavg);
-    printf("\n  AVERAGE PRESSURE  (Pa):                  %15.5f\n",Pavg);
-    printf("\n  PV/nT (J * mol^-1 K^-1):                 %15.5f\n",gc);
-    printf("\n  PERCENT ERROR of pV/nT AND GAS CONSTANT: %15.5f\n",100*fabs(gc-8.3144598)/8.3144598);
-    printf("\n  THE COMPRESSIBILITY (unitless):          %15.5f \n",Z);
-    printf("\n  TOTAL VOLUME (m^3):                      %10.5e \n",Volume);
+    printf("\n  AVERAGE TEMPERATURE (K):                 %15.12f\n",Tavg);
+    printf("\n  AVERAGE PRESSURE  (Pa):                  %15.12f\n",Pavg);
+    printf("\n  PV/nT (J * mol^-1 K^-1):                 %15.12f\n",gc);
+    printf("\n  PERCENT ERROR of pV/nT AND GAS CONSTANT: %15.12f\n",100*fabs(gc-8.3144598)/8.3144598);
+    printf("\n  THE COMPRESSIBILITY (unitless):          %15.12f \n",Z);
+    printf("\n  TOTAL VOLUME (m^3):                      %10.12e \n",Vol*VolFac);
     printf("\n  NUMBER OF PARTICLES (unitless):          %i \n", N);
     
     
@@ -377,9 +378,9 @@ void initialize() {
         for (int j=0; j<n; j++) {
             for (int k=0; k<n; k++) {
                 if (p<N) {
-                    r[0][p] = (i + 0.5)*pos;
-                    r[1][p] = (j + 0.5)*pos;
-                    r[2][p] = (k + 0.5)*pos;
+                    r[p*3] = (i + 0.5)*pos;
+                    r[p*3 + 1] = (j + 0.5)*pos;
+                    r[p*3 + 2] = (k + 0.5)*pos;
                 }
                 p++;
             }
@@ -396,9 +397,9 @@ void MeanSqdVelocityAndKinetic() {
     double vSquared = 0.;
     
     for (int i=0; i<N; i++) {
-        double vX = v[0][i];
-        double vY = v[1][i];
-        double vZ = v[2][i];
+        double vX = v[i*3];
+        double vY = v[i*3 + 1];
+        double vZ = v[i*3 + 2];
 
         vSquared += vX*vX + vY*vY + vZ*vZ;
     }
@@ -407,7 +408,8 @@ void MeanSqdVelocityAndKinetic() {
     KE = (m/2.)*vSquared;
 }
 
-__device__ double atomicAddDouble(double* address, double val) {
+__device__ 
+double atomicAddDouble(double* address, double val) {
     unsigned long long int* address_as_ull = (unsigned long long int*)address;
     unsigned long long int old = *address_as_ull, assumed;
 
@@ -421,111 +423,79 @@ __device__ double atomicAddDouble(double* address, double val) {
 }
 
 
-__global__ void stencilKernel(double *d_ax, double *d_ay, double *d_az
-                            , double *d_rx, double *d_ry, double *d_rz, double *d_potential, int N) {
-    
+__global__ 
+void stencilKernel(double *d_a, double *d_r, double *d_pot) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N) return;
+    if (idx >= N - 1) return;
 
-    //printf("GPU: %f | ", d_rx[idx]);
-    
-    double accelAcc[3] = {0.0, 0.0, 0.0}, potential = 0.0;
+    double accelAcc[3] = {0,0,0};
+    double localPot = 0;
 
     for (int j = idx+1; j < N; j++) {
         double rij[3];
-        rij[0] = d_rx[idx] - d_rx[j];
-        rij[1] = d_ry[idx] - d_ry[j];
-        rij[2] = d_rz[idx] - d_rz[j];
+
+        for(int k = 0; k < 3; k++){
+            rij[k] = d_r[idx*3 + k] - d_r[j*3 + k];
+        }
 
         double rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
-        double rSqdInv = 1 / rSqd;
+        double rSqdInv = 1.0 / rSqd;
         double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
         double rSqd4Inv = rSqdInv * rSqd3Inv;
 
-        potential += 8 * rSqd3Inv * (rSqd3Inv - 1);
+        localPot += 8 * rSqd3Inv * (rSqd3Inv - 1);
 
         // From derivative of Lennard-Jones with sigma and epsilon set equal to 1
         double f = rSqd4Inv * (48 * rSqd3Inv - 24);
-        
-        double fKx = rij[0] * f;
-        double fKy = rij[1] * f;
-        double fKz = rij[2] * f;
 
-        accelAcc[0] += fKx;
-        accelAcc[1] += fKy;
-        accelAcc[2] += fKz;
+        for(int k = 0; k < 3; k++){
+            double fK = rij[k] * f;
 
-        atomicAddDouble(&d_ax[j], -fKx);
-        atomicAddDouble(&d_ay[j], -fKy);
-        atomicAddDouble(&d_az[j], -fKz);
+            accelAcc[k] += fK;
+            atomicAddDouble(&d_a[j*3 + k], -fK);
+        }
     }
 
-    atomicAddDouble(&d_ax[idx], accelAcc[0]);
-    atomicAddDouble(&d_ay[idx], accelAcc[1]);
-    atomicAddDouble(&d_az[idx], accelAcc[2]);
+    for(int k = 0; k < 3; k++){
+        atomicAddDouble(&d_a[idx*3 + k], accelAcc[k]);
+    }
 
-    atomicAddDouble(d_potential, potential);
+    atomicAddDouble(d_pot, localPot);
 }
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom.
 void computeAccelsAndPotential() {
-    double *d_ax, *d_ay, *d_az; 
-    double *d_rx, *d_ry, *d_rz;
-    double *d_potential;
+    double *d_a, *d_r, *d_pot;
 
-    int bytes = sizeof(double) * N;
+    int bytes = N * 3 * sizeof(double);
+    
+    cudaMalloc((void **)&d_r, bytes);
+    cudaMalloc((void **)&d_pot, sizeof(double));
+    cudaMalloc((void **)&d_a, bytes);
+    checkCUDAError("mem allocation");
 
-    cudaMalloc((void **)&d_potential, sizeof(double));
-
-    cudaMalloc((void **)&d_ax, bytes);
-    cudaMalloc((void **)&d_ay, bytes);
-    cudaMalloc((void **)&d_az, bytes);
-
-    cudaMalloc((void **)&d_rx, bytes);
-    cudaMalloc((void **)&d_ry, bytes);
-    cudaMalloc((void **)&d_rz, bytes);
-    //checkCUDAError("mem allocation");
-
-    cudaMemcpy(d_rx, r[0], bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_ry, r[1], bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_rz, r[2], bytes, cudaMemcpyHostToDevice);
-    //checkCUDAError("memcpy h->d");
-
-    cudaMemset(d_potential, 0, sizeof(double));
-    cudaMemset(d_ax, 0, bytes);
-    cudaMemset(d_ay, 0, bytes);
-    cudaMemset(d_az, 0, bytes);
+    cudaMemcpy(d_r, r, bytes, cudaMemcpyHostToDevice);
+    cudaMemset(d_pot, 0, sizeof(double));
+    cudaMemset(d_a, 0, bytes);
+    checkCUDAError("memcpy h->d");
 
     // Lançamento do kernel
-    int threadsPerBlock = 256;
-    int blocks = 20;
-    stencilKernel <<< blocks, threadsPerBlock >>> (d_ax, d_ay, d_az, d_rx, d_ry, d_rz, d_potential, N);
-
-    //checkCUDAError("kernel invocation");
-    cudaMemcpy(a[0], d_ax, bytes, cudaMemcpyDeviceToHost);
-    cudaMemcpy(a[1], d_ay, bytes, cudaMemcpyDeviceToHost);
-    cudaMemcpy(a[2], d_az, bytes, cudaMemcpyDeviceToHost);
-
-   // for (int i=0; i<N; i++){
-     //   printf("%f | ", a[0][i]);
-   // }
+    stencilKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (d_a, d_r, d_pot);
+    checkCUDAError("kernel invocation");
 
     double pot;
-    cudaMemcpy(&pot, d_potential, sizeof(double), cudaMemcpyDeviceToHost);
-    PE = pot;
-    //printf("%f | ", PE);
-    //checkCUDAError("memcpy d->h");
+    cudaMemcpy(&pot, d_pot, sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(a, d_a, bytes, cudaMemcpyDeviceToHost);
+    checkCUDAError("memcpy d->h");
 
-    cudaFree(d_ax);
-    cudaFree(d_ay);
-    cudaFree(d_az);
-    cudaFree(d_rx);
-    cudaFree(d_ry);
-    cudaFree(d_rz);
-    cudaFree(d_potential);
-	//checkCUDAError("mem free");
+    cudaFree(d_r);
+    cudaFree(d_a);
+    cudaFree(d_pot);
+    checkCUDAError("mem free");   
+
+    PE = pot;
 }
 
 
@@ -535,13 +505,13 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     
     //  Update positions and velocity with current velocity and acceleration
     for (int i=0; i<N; i++) {
-        r[0][i] += dt*(v[0][i] + halfDT*a[0][i]);
-        r[1][i] += dt*(v[1][i] + halfDT*a[1][i]);
-        r[2][i] += dt*(v[2][i] + halfDT*a[2][i]);
+        r[i*3] += dt*(v[i*3] + halfDT*a[i*3]);
+        r[i*3 + 1] += dt*(v[i*3 + 1] + halfDT*a[i*3 + 1]);
+        r[i*3 + 2] += dt*(v[i*3 + 2] + halfDT*a[i*3 + 2]);
             
-        v[0][i] += halfDT * a[0][i];
-        v[1][i] += halfDT * a[1][i];
-        v[2][i] += halfDT * a[2][i];
+        v[i*3] += halfDT * a[i*3];
+        v[i*3 + 1] += halfDT * a[i*3 + 1];
+        v[i*3 + 2] += halfDT * a[i*3 + 2];
     }
 
     //  Update accellerations from updated positions and potential
@@ -549,21 +519,21 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
 
     //  Update velocity with updated acceleration
     for (int i=0; i<N; i++) {
-        v[0][i] += halfDT*a[0][i];
-        v[1][i] += halfDT*a[1][i];
-        v[2][i] += halfDT*a[2][i];
+        v[i*3] += halfDT*a[i*3];
+        v[i*3 + 1] += halfDT*a[i*3 + 1];
+        v[i*3 + 2] += halfDT*a[i*3 + 2];
     }
     
     // Elastic walls
     for (int i=0; i<N; i++) {
         for (int j=0; j<3; j++) {
-            if (r[j][i]<0.) {
-                v[j][i] *=-1.; //- elastic walls
-                psum += 2*m*fabs(v[j][i])/dt;  // contribution to pressure from "left" walls
+            if (r[i*3 + j]<0.) {
+                v[i*3 + j] *=-1.; //- elastic walls
+                psum += 2*m*fabs(v[i*3 + j])/dt;  // contribution to pressure from "left" walls
             }
-            if (r[j][i]>=L) {
-                v[j][i]*=-1.;  //- elastic walls
-                psum += 2*m*fabs(v[j][i])/dt;  // contribution to pressure from "right" walls
+            if (r[i*3 + j]>=L) {
+                v[i*3 + j]*=-1.;  //- elastic walls
+                psum += 2*m*fabs(v[i*3 + j])/dt;  // contribution to pressure from "right" walls
             }
         }
     }
@@ -575,9 +545,9 @@ void initializeVelocities() {
     
     for (int i=0; i<N; i++) {
         //  Pull a number from a Gaussian Distribution
-        v[0][i] = gaussdist();
-        v[1][i] = gaussdist();
-        v[2][i] = gaussdist();
+        v[i*3] = gaussdist();
+        v[i*3 + 1] = gaussdist();
+        v[i*3 + 2] = gaussdist();
     }
     
     // Vcm = sum_i^N  m*v_i/  sum_i^N  M
@@ -585,9 +555,9 @@ void initializeVelocities() {
     double vCM[3] = {0, 0, 0};
     
     for (int i=0; i<N; i++) {
-         vCM[0] += m*v[0][i];
-         vCM[1] += m*v[1][i];
-         vCM[2] += m*v[2][i];
+         vCM[0] += m*v[i*3];
+         vCM[1] += m*v[i*3 + 1];
+         vCM[2] += m*v[i*3 + 2];
     }
     
     
@@ -601,9 +571,9 @@ void initializeVelocities() {
     //  center of mass velocity to zero so that the system does
     //  not drift in space!
     for (int i=0; i<N; i++) {
-        v[0][i] -= vCM[0];
-        v[1][i] -= vCM[1];
-        v[2][i] -= vCM[2];
+        v[i*3] -= vCM[0];
+        v[i*3 + 1] -= vCM[1];
+        v[i*3 + 2] -= vCM[2];
     }
     
     //  Now we want to scale the average velocity of the system
@@ -611,9 +581,9 @@ void initializeVelocities() {
     double vSqdSum, lambda;
     vSqdSum=0.;
     for (int i=0; i<N; i++) {
-        double vX = v[0][i];
-        double vY = v[1][i];
-        double vZ = v[2][i];
+        double vX = v[i*3];
+        double vY = v[i*3 + 1];
+        double vZ = v[i*3 + 2];
 
         vSqdSum += vX*vX + vY*vY + vZ*vZ;
     }
@@ -621,9 +591,9 @@ void initializeVelocities() {
     lambda = sqrt( 3*(N-1)*Tinit/vSqdSum);
     
     for (int i=0; i<N; i++) {
-        v[0][i] *= lambda;
-        v[1][i] *= lambda;
-        v[2][i] *= lambda;
+        v[i*3] *= lambda;
+        v[i*3 + 1] *= lambda;
+        v[i*3 + 2] *= lambda;
     }
 }
 
