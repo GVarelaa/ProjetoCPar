@@ -426,9 +426,10 @@ __global__ void stencilKernel(double *d_ax, double *d_ay, double *d_az
     
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= N) return;
+
+    //printf("GPU: %f | ", d_rx[idx]);
     
-    double accelAcc[3] = {0.0, 0.0, 0.0};
-    double potential = 0.0;
+    double accelAcc[3] = {0.0, 0.0, 0.0}, potential = 0.0;
 
     for (int j = idx+1; j < N; j++) {
         double rij[3];
@@ -459,13 +460,11 @@ __global__ void stencilKernel(double *d_ax, double *d_ay, double *d_az
         atomicAddDouble(&d_az[j], -fKz);
     }
 
-    d_ax[idx] = accelAcc[0];
-    d_ay[idx] = accelAcc[1];
-    d_az[idx] = accelAcc[2];
+    atomicAddDouble(&d_ax[idx], accelAcc[0]);
+    atomicAddDouble(&d_ay[idx], accelAcc[1]);
+    atomicAddDouble(&d_az[idx], accelAcc[2]);
 
-    d_potential[idx] = potential;
-
-    //atomicAdd(d_PE, potential);
+    atomicAddDouble(d_potential, potential);
 }
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
@@ -475,11 +474,10 @@ void computeAccelsAndPotential() {
     double *d_ax, *d_ay, *d_az; 
     double *d_rx, *d_ry, *d_rz;
     double *d_potential;
-    double potential;
 
     int bytes = sizeof(double) * N;
 
-    cudaMalloc((void **)d_potential, sizeof(double));
+    cudaMalloc((void **)&d_potential, sizeof(double));
 
     cudaMalloc((void **)&d_ax, bytes);
     cudaMalloc((void **)&d_ay, bytes);
@@ -506,16 +504,18 @@ void computeAccelsAndPotential() {
     stencilKernel <<< blocks, threadsPerBlock >>> (d_ax, d_ay, d_az, d_rx, d_ry, d_rz, d_potential, N);
 
     //checkCUDAError("kernel invocation");
-
     cudaMemcpy(a[0], d_ax, bytes, cudaMemcpyDeviceToHost);
     cudaMemcpy(a[1], d_ay, bytes, cudaMemcpyDeviceToHost);
     cudaMemcpy(a[2], d_az, bytes, cudaMemcpyDeviceToHost);
 
-    for (int i=0; i<N; i++){
-        printf("%f | ", a[0][i]);
-    }
+   // for (int i=0; i<N; i++){
+     //   printf("%f | ", a[0][i]);
+   // }
 
-    cudaMemcpy(&PE, d_potential, bytes, cudaMemcpyDeviceToHost);
+    double pot;
+    cudaMemcpy(&pot, d_potential, sizeof(double), cudaMemcpyDeviceToHost);
+    PE = pot;
+    //printf("%f | ", PE);
     //checkCUDAError("memcpy d->h");
 
     cudaFree(d_ax);
