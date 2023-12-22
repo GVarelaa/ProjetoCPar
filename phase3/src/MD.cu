@@ -28,6 +28,7 @@
 #include<math.h>
 #include<string.h>
 #include<unistd.h>
+#include<cuda_runtime.h>
 
 
 // Number of particles
@@ -52,11 +53,11 @@ double Tinit;  //2;
 //
 const int MAXPART=5004;
 //  Position
-double r[3][MAXPART] __attribute__((aligned(32)));
+double r[3][MAXPART];
 //  Velocity
-double v[3][MAXPART] __attribute__((aligned(32)));
+double v[3][MAXPART];
 //  Acceleration
-double a[3][MAXPART] __attribute__((aligned(32)));
+double a[3][MAXPART];
 
 double PE = 0;
 double mvs = 0;
@@ -91,8 +92,8 @@ int main()
     double dt, Vol, Temp, Press, Pavg, Tavg, rho;
     double VolFac, TempFac, PressFac, timefac;
     double gc, Z;
-    char trash[10000], prefix[1000], tfn[1000], ofn[1000], afn[1000];
-    FILE *infp, *tfp, *ofp, *afp;
+    char prefix[1000], tfn[1000], ofn[1000], afn[1000];
+    FILE *tfp, *ofp, *afp;
     
     
     printf("\n  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
@@ -359,21 +360,22 @@ int main()
 
 
 void initialize() {
-    int n, p, i, j, k;
-    double pos;
+    int n, p;
+    float pos;
     
     // Number of atoms in each direction
     n = int(ceil(pow(N, 1.0/3)));
-    
+
     //  spacing between atoms along a given direction
     pos = L / n;
     
     //  index for number of particles assigned positions
     p = 0;
+
     //  initialize positions
-    for (i=0; i<n; i++) {
-        for (j=0; j<n; j++) {
-            for (k=0; k<n; k++) {
+    for (int i=0; i<n; i++) {
+        for (int j=0; j<n; j++) {
+            for (int k=0; k<n; k++) {
                 if (p<N) {
                     r[0][p] = (i + 0.5)*pos;
                     r[1][p] = (j + 0.5)*pos;
@@ -473,27 +475,27 @@ void computeAccelsAndPotential() {
     double *d_ax, *d_ay, *d_az; 
     double *d_rx, *d_ry, *d_rz;
     double *d_potential;
-    double potential[N];
+    double potential;
 
     int bytes = sizeof(double) * N;
 
-    cudaMalloc(&d_potential, bytes);
-    
-    cudaMalloc(&d_ax, bytes);
-    cudaMalloc(&d_ay, bytes);
-    cudaMalloc(&d_az, bytes);
+    cudaMalloc((void **)d_potential, sizeof(double));
 
-    cudaMalloc(&d_rx, bytes);
-    cudaMalloc(&d_ry, bytes);
-    cudaMalloc(&d_rz, bytes);
+    cudaMalloc((void **)&d_ax, bytes);
+    cudaMalloc((void **)&d_ay, bytes);
+    cudaMalloc((void **)&d_az, bytes);
+
+    cudaMalloc((void **)&d_rx, bytes);
+    cudaMalloc((void **)&d_ry, bytes);
+    cudaMalloc((void **)&d_rz, bytes);
     //checkCUDAError("mem allocation");
 
-    cudaMemcpy (d_rx, r[0], bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy (d_ry, r[1], bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy (d_rz, r[2], bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_rx, r[0], bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_ry, r[1], bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_rz, r[2], bytes, cudaMemcpyHostToDevice);
     //checkCUDAError("memcpy h->d");
 
-    cudaMemset(potential, 0, bytes);
+    cudaMemset(d_potential, 0, sizeof(double));
     cudaMemset(d_ax, 0, bytes);
     cudaMemset(d_ay, 0, bytes);
     cudaMemset(d_az, 0, bytes);
@@ -501,13 +503,19 @@ void computeAccelsAndPotential() {
     // Lançamento do kernel
     int threadsPerBlock = 256;
     int blocks = 20;
-    stencilKernel <<< threadsPerBlock, blocks >>> (d_ax, d_ay, d_az, d_rx, d_ry, d_rz, d_potential, N);
+    stencilKernel <<< blocks, threadsPerBlock >>> (d_ax, d_ay, d_az, d_rx, d_ry, d_rz, d_potential, N);
+
     //checkCUDAError("kernel invocation");
 
     cudaMemcpy(a[0], d_ax, bytes, cudaMemcpyDeviceToHost);
     cudaMemcpy(a[1], d_ay, bytes, cudaMemcpyDeviceToHost);
     cudaMemcpy(a[2], d_az, bytes, cudaMemcpyDeviceToHost);
-    cudaMemcpy(potential, d_potential, bytes, cudaMemcpyDeviceToHost);
+
+    for (int i=0; i<N; i++){
+        printf("%f | ", a[0][i]);
+    }
+
+    cudaMemcpy(&PE, d_potential, bytes, cudaMemcpyDeviceToHost);
     //checkCUDAError("memcpy d->h");
 
     cudaFree(d_ax);
@@ -518,23 +526,15 @@ void computeAccelsAndPotential() {
     cudaFree(d_rz);
     cudaFree(d_potential);
 	//checkCUDAError("mem free");
-
-    double potentialAcc = 0;
-    for(int i = 0; i < N; i++){
-        potentialAcc += potential[i];
-    }
-
-    PE = potentialAcc;
 }
 
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
 double VelocityVerlet(double dt, int iter, FILE *fp) {
-    int i, j, k;
     double psum = 0., halfDT = 0.5*dt;
     
     //  Update positions and velocity with current velocity and acceleration
-    for (i=0; i<N; i++) {
+    for (int i=0; i<N; i++) {
         r[0][i] += dt*(v[0][i] + halfDT*a[0][i]);
         r[1][i] += dt*(v[1][i] + halfDT*a[1][i]);
         r[2][i] += dt*(v[2][i] + halfDT*a[2][i]);
@@ -548,15 +548,15 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     computeAccelsAndPotential();
 
     //  Update velocity with updated acceleration
-    for (i=0; i<N; i++) {
+    for (int i=0; i<N; i++) {
         v[0][i] += halfDT*a[0][i];
         v[1][i] += halfDT*a[1][i];
         v[2][i] += halfDT*a[2][i];
     }
     
     // Elastic walls
-    for (i=0; i<N; i++) {
-        for (j=0; j<3; j++) {
+    for (int i=0; i<N; i++) {
+        for (int j=0; j<3; j++) {
             if (r[j][i]<0.) {
                 v[j][i] *=-1.; //- elastic walls
                 psum += 2*m*fabs(v[j][i])/dt;  // contribution to pressure from "left" walls
@@ -573,9 +573,7 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
 
 void initializeVelocities() {
     
-    int i, j;
-    
-    for (i=0; i<N; i++) {
+    for (int i=0; i<N; i++) {
         //  Pull a number from a Gaussian Distribution
         v[0][i] = gaussdist();
         v[1][i] = gaussdist();
@@ -586,7 +584,7 @@ void initializeVelocities() {
     // Compute center-of-mas velocity according to the formula above
     double vCM[3] = {0, 0, 0};
     
-    for (i=0; i<N; i++) {
+    for (int i=0; i<N; i++) {
          vCM[0] += m*v[0][i];
          vCM[1] += m*v[1][i];
          vCM[2] += m*v[2][i];
@@ -602,7 +600,7 @@ void initializeVelocities() {
     //  velocity of each particle... effectively set the
     //  center of mass velocity to zero so that the system does
     //  not drift in space!
-    for (i=0; i<N; i++) {
+    for (int i=0; i<N; i++) {
         v[0][i] -= vCM[0];
         v[1][i] -= vCM[1];
         v[2][i] -= vCM[2];
@@ -612,7 +610,7 @@ void initializeVelocities() {
     //  by a factor which is consistent with our initial temperature, Tinit
     double vSqdSum, lambda;
     vSqdSum=0.;
-    for (i=0; i<N; i++) {
+    for (int i=0; i<N; i++) {
         double vX = v[0][i];
         double vY = v[1][i];
         double vZ = v[2][i];
@@ -622,7 +620,7 @@ void initializeVelocities() {
     
     lambda = sqrt( 3*(N-1)*Tinit/vSqdSum);
     
-    for (i=0; i<N; i++) {
+    for (int i=0; i<N; i++) {
         v[0][i] *= lambda;
         v[1][i] *= lambda;
         v[2][i] *= lambda;
