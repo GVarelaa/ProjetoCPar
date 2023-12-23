@@ -362,7 +362,7 @@ int main()
 
 void initialize() {
     int n, p;
-    float pos;
+    double pos;
     
     // Number of atoms in each direction
     n = int(ceil(pow(N, 1.0/3)));
