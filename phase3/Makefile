@@ -10,7 +10,7 @@ BIN_NAME = stencil
 CXX = nvcc
 LD  = nvcc
 
-CXXFLAGS   = -O2 -g -std=c++11 -arch=sm_35 -Wno-deprecated-gpu-targets  #-Ofast -mavx -ftree-vectorize
+CXXFLAGS   = -O3 -g -std=c++11 -arch=sm_35 -Wno-deprecated-gpu-targets  #-Ofast -mavx -ftree-vectorize
 
 SRC_DIR = src
 BIN_DIR = bin
@@ -24,13 +24,16 @@ vpath %.cu $(SRC_DIR)
 ################################################################################
 # Rules
 ################################################################################
-
 .DEFAULT_GOAL = all
 
 $(BUILD_DIR)/%.o: %.cu
+	module load gcc/7.2.0;\
+	module load cuda/11.3.1;\
 	$(CXX) -c $(CXXFLAGS) $(INCLUDES) $< -o $@ $(LIBS)
 
 $(BIN_DIR)/$(BIN_NAME): $(OBJ)
+	module load gcc/7.2.0;\
+	module load cuda/11.3.1;\
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $(OBJ) $(LIBS)
 
 checkdirs:
