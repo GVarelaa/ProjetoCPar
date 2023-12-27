@@ -94,8 +94,8 @@ int main()
     double dt, Vol, Temp, Press, Pavg, Tavg, rho;
     double VolFac, TempFac, PressFac, timefac;
     double gc, Z;
-    char trash[10000], prefix[1000], tfn[1000], ofn[1000], afn[1000];
-    FILE *infp, *tfp, *ofp, *afp;
+    char prefix[1000], tfn[1000], ofn[1000], afn[1000];
+    FILE *tfp, *ofp, *afp;
     
     
     printf("\n  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
@@ -429,7 +429,6 @@ void stencilKernel(double *d_a, double *d_r, double *d_pot) {
     if (idx >= N - 1) return;
 
     double accelAcc[3] = {0,0,0};
-    double localPot = 0;
 
     for (int j = idx+1; j < N; j++) {
         double rij[3];
@@ -443,7 +442,7 @@ void stencilKernel(double *d_a, double *d_r, double *d_pot) {
         double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
         double rSqd4Inv = rSqdInv * rSqd3Inv;
 
-        localPot += 8 * rSqd3Inv * (rSqd3Inv - 1);
+        d_pot[idx] += 8 * rSqd3Inv * (rSqd3Inv - 1);
 
         // From derivative of Lennard-Jones with sigma and epsilon set equal to 1
         double f = rSqd4Inv * (48 * rSqd3Inv - 24);
@@ -459,8 +458,6 @@ void stencilKernel(double *d_a, double *d_r, double *d_pot) {
     for(int k = 0; k < 3; k++){
         atomicAddDouble(&d_a[idx*3 + k], accelAcc[k]);
     }
-
-    atomicAddDouble(d_pot, localPot);
 }
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
@@ -472,12 +469,12 @@ void computeAccelsAndPotential() {
     int bytes = N * 3 * sizeof(double);
     
     cudaMalloc((void **)&d_r, bytes);
-    cudaMalloc((void **)&d_pot, sizeof(double));
+    cudaMalloc((void **)&d_pot, N*sizeof(double));
     cudaMalloc((void **)&d_a, bytes);
     checkCUDAError("mem allocation");
 
     cudaMemcpy(d_r, r, bytes, cudaMemcpyHostToDevice);
-    cudaMemset(d_pot, 0, sizeof(double));
+    cudaMemset(d_pot, 0, N*sizeof(double));
     cudaMemset(d_a, 0, bytes);
     checkCUDAError("memcpy h->d");
 
@@ -485,8 +482,8 @@ void computeAccelsAndPotential() {
     stencilKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (d_a, d_r, d_pot);
     checkCUDAError("kernel invocation");
 
-    double pot;
-    cudaMemcpy(&pot, d_pot, sizeof(double), cudaMemcpyDeviceToHost);
+    double pot[N];
+    cudaMemcpy(pot, d_pot, N*sizeof(double), cudaMemcpyDeviceToHost);
     cudaMemcpy(a, d_a, bytes, cudaMemcpyDeviceToHost);
     checkCUDAError("memcpy d->h");
 
@@ -495,7 +492,12 @@ void computeAccelsAndPotential() {
     cudaFree(d_pot);
     checkCUDAError("mem free");   
 
-    PE = pot;
+    double potentialAcc = 0;
+    for(int i=0; i<N; i++){
+        potentialAcc += pot[i];
+    }
+
+    PE = potentialAcc;
 }
 
 
