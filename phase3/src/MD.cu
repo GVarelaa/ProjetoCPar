@@ -35,7 +35,8 @@
 const int N=5000;
 
 #define NUM_THREADS_PER_BLOCK 256
-#define NUM_BLOCKS ((N + NUM_THREADS_PER_BLOCK - 1) / NUM_THREADS_PER_BLOCK)
+//#define NUM_BLOCKS ((N * N + NUM_THREADS_PER_BLOCK - 1) / NUM_THREADS_PER_BLOCK)
+#define NUM_BLOCKS 20
 #define MAXPART NUM_BLOCKS*NUM_THREADS_PER_BLOCK
 
 //  Lennard-Jones parameters in natural units!
@@ -55,11 +56,11 @@ double L;
 double Tinit;  //2;
 //  Vectors!
 //  Position
-double r[3*MAXPART];
+double r[3*N];
 //  Velocity
-double v[3*MAXPART];
+double v[3*N];
 //  Acceleration
-double a[3*MAXPART];
+double a[3*N];
 
 double PE = 0;
 double mvs = 0;
@@ -94,8 +95,8 @@ int main()
     double dt, Vol, Temp, Press, Pavg, Tavg, rho;
     double VolFac, TempFac, PressFac, timefac;
     double gc, Z;
-    char prefix[1000], tfn[1000], ofn[1000], afn[1000];
-    FILE *tfp, *ofp, *afp;
+    char trash[10000], prefix[1000], tfn[1000], ofn[1000], afn[1000];
+    FILE *infp, *tfp, *ofp, *afp;
     
     
     printf("\n  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
@@ -422,19 +423,36 @@ double atomicAddDouble(double* address, double val) {
     return __longlong_as_double(old);
 }
 
+__device__ void mapPairIndexToIJ(int pairIdx, int N, int *i, int *j) {
+    *i = 0;
+    int k = N - 1; // Número de pares na primeira linha
+
+    while (pairIdx >= k) {
+        pairIdx -= k;
+        (*i)++;
+        k--;
+    }
+
+    *j = *i + 1 + pairIdx;
+}
 
 __global__ 
-void stencilKernel(double *d_a, double *d_r, double *d_pot) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N - 1) return;
+void stencilKernel(double *d_a, double *d_r, double *d_pot, int pairsPerThread, int totalPairs) {
+    // Calculando os índices i, j do par
+    int globalIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    int startPairIdx = globalIdx * pairsPerThread;
+    int endPairIdx = min((globalIdx + 1) * pairsPerThread, totalPairs);
+    double pot = 0;
 
-    double accelAcc[3] = {0,0,0};
-
-    for (int j = idx+1; j < N; j++) {
+    for (int pairIdx = startPairIdx; pairIdx < endPairIdx; pairIdx++) {
+        // Calcula os índices i e j com base em pairIdx
+        int i, j;
+        mapPairIndexToIJ(globalIdx, N, &i, &j);
+        // Lógica para determinar i e j vai aqui
         double rij[3];
 
         for(int k = 0; k < 3; k++){
-            rij[k] = d_r[idx*3 + k] - d_r[j*3 + k];
+            rij[k] = d_r[i*3 + k] - d_r[j*3 + k];
         }
 
         double rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
@@ -442,7 +460,7 @@ void stencilKernel(double *d_a, double *d_r, double *d_pot) {
         double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
         double rSqd4Inv = rSqdInv * rSqd3Inv;
 
-        d_pot[idx] += 8 * rSqd3Inv * (rSqd3Inv - 1);
+        pot += 8 * rSqd3Inv * (rSqd3Inv - 1); ;
 
         // From derivative of Lennard-Jones with sigma and epsilon set equal to 1
         double f = rSqd4Inv * (48 * rSqd3Inv - 24);
@@ -450,14 +468,12 @@ void stencilKernel(double *d_a, double *d_r, double *d_pot) {
         for(int k = 0; k < 3; k++){
             double fK = rij[k] * f;
 
-            accelAcc[k] += fK;
-            atomicAddDouble(&d_a[j*3 + k], -fK);
+            //atomicAddDouble(&d_a[j*3 + k], -fK);
+            //atomicAddDouble(&d_a[i*3 + k], fK);
         }
     }
 
-    for(int k = 0; k < 3; k++){
-        atomicAddDouble(&d_a[idx*3 + k], accelAcc[k]);
-    }
+    atomicAddDouble(d_pot, pot);
 }
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
@@ -469,21 +485,27 @@ void computeAccelsAndPotential() {
     int bytes = N * 3 * sizeof(double);
     
     cudaMalloc((void **)&d_r, bytes);
-    cudaMalloc((void **)&d_pot, N*sizeof(double));
+    cudaMalloc((void **)&d_pot, sizeof(double));
     cudaMalloc((void **)&d_a, bytes);
     checkCUDAError("mem allocation");
 
     cudaMemcpy(d_r, r, bytes, cudaMemcpyHostToDevice);
-    cudaMemset(d_pot, 0, N*sizeof(double));
+    cudaMemset(d_pot, 0, sizeof(double));
     cudaMemset(d_a, 0, bytes);
     checkCUDAError("memcpy h->d");
 
+    //printf("Blocos: %d\n", NUM_BLOCKS);
+    //printf("Threads: %d\n", NUM_THREADS_PER_BLOCK);
     // Lançamento do kernel
-    stencilKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (d_a, d_r, d_pot);
+    int totalPairs = N * (N - 1) / 2;
+    int totalThreads = NUM_BLOCKS * NUM_THREADS_PER_BLOCK;
+    int pairsPerThread = (totalPairs + totalThreads - 1) / totalThreads;
+
+    stencilKernel <<< NUM_BLOCKS, NUM_THREADS_PER_BLOCK >>> (d_a, d_r, d_pot, pairsPerThread, totalPairs);
     checkCUDAError("kernel invocation");
 
-    double pot[N];
-    cudaMemcpy(pot, d_pot, N*sizeof(double), cudaMemcpyDeviceToHost);
+    double pot;
+    cudaMemcpy(&pot, d_pot, sizeof(double), cudaMemcpyDeviceToHost);
     cudaMemcpy(a, d_a, bytes, cudaMemcpyDeviceToHost);
     checkCUDAError("memcpy d->h");
 
@@ -492,12 +514,7 @@ void computeAccelsAndPotential() {
     cudaFree(d_pot);
     checkCUDAError("mem free");   
 
-    double potentialAcc = 0;
-    for(int i=0; i<N; i++){
-        potentialAcc += pot[i];
-    }
-
-    PE = potentialAcc;
+    PE = pot;
 }
 
 
