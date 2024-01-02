@@ -426,59 +426,53 @@ double atomicAddDouble(double* address, double val) {
 __global__ 
 void stencilKernel(double *d_a, double *d_r, double *d_pot) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N-1) return; // idx >= N-1
+    int tid = threadIdx.x;
+    if (idx >= N) return; // idx >= N-1
 
-    double accelAcc[3] = {0,0,0};
-    for (int j = 0; j < idx; j++) {
-        double rij[3];
+    extern __shared__ double sdata[];
+    sdata[tid] = 0;
+    __syncthreads();
 
-        for(int k = 0; k < 3; k++){
-            rij[k] = d_r[idx*3 + k] - d_r[j*3 + k];
-        }
+    double accelAcc[3] = {0,0,0}, pot = 0;
+    double d_rx = d_r[idx*3], d_ry = d_r[idx*3 + 1], d_rz = d_r[idx*3 + 2];
+    for(int j = 0; j < N; j++) {
+        if(idx != j){
+            double rij[3];
+            rij[0] = d_rx - d_r[j*3];
+            rij[1] = d_ry - d_r[j*3 + 1];
+            rij[2] = d_rz - d_r[j*3 + 2];
 
-        double rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
-        double rSqdInv = 1.0 / rSqd;
-        double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
-        double rSqd4Inv = rSqdInv * rSqd3Inv;
+            double rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
+            double rSqdInv = 1.0 / rSqd;
+            double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
+            double rSqd4Inv = rSqdInv * rSqd3Inv;
 
-        // From derivative of Lennard-Jones with sigma and epsilon set equal to 1
-        double f = rSqd4Inv * (48 * rSqd3Inv - 24);
+            pot += 4 * rSqd3Inv * (rSqd3Inv - 1);
 
-        for(int k = 0; k < 3; k++){
-            double fK = rij[k] * f;
+            // From derivative of Lennard-Jones with sigma and epsilon set equal to 1
+            double f = rSqd4Inv * (48 * rSqd3Inv - 24);
 
-            accelAcc[k] -= fK;
-        }
-    }
+            for(int k = 0; k < 3; k++){
+                double fK = rij[k] * f;
 
-
-    for(int j = idx+1; j < N-1; j++) {
-        double rij[3];
-
-        for(int k = 0; k < 3; k++){
-            rij[k] = d_r[idx*3 + k] - d_r[j*3 + k];
-        }
-
-        double rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
-        double rSqdInv = 1.0 / rSqd;
-        double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
-        double rSqd4Inv = rSqdInv * rSqd3Inv;
-
-        d_pot[idx] += 8 * rSqd3Inv * (rSqd3Inv - 1);
-
-        // From derivative of Lennard-Jones with sigma and epsilon set equal to 1
-        double f = rSqd4Inv * (48 * rSqd3Inv - 24);
-
-        for(int k = 0; k < 3; k++){
-            double fK = rij[k] * f;
-
-            accelAcc[k] += fK;
+                accelAcc[k] += fK;
+            }
         }
     }
 
+    sdata[tid] = pot;
     for(int k = 0; k < 3; k++){
         d_a[idx*3 + k] = accelAcc[k];
     }
+
+    for(unsigned int s=blockDim.x/2; s>0; s>>=1){
+        if(tid < s){
+            sdata[tid] += sdata[tid + s];
+        }
+        __syncthreads();
+    }
+
+    if(tid == 0) d_pot[blockIdx.x] = sdata[0];
 }
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
@@ -490,21 +484,22 @@ void computeAccelsAndPotential() {
     int bytes = N * 3 * sizeof(double);
     
     cudaMalloc((void **)&d_r, bytes);
-    cudaMalloc((void **)&d_pot, N*sizeof(double));
+    cudaMalloc((void **)&d_pot, NUM_THREADS_PER_BLOCK*sizeof(double));
     cudaMalloc((void **)&d_a, bytes);
     checkCUDAError("mem allocation");
 
     cudaMemcpy(d_r, r, bytes, cudaMemcpyHostToDevice);
-    cudaMemset(d_pot, 0, N*sizeof(double));
+    cudaMemset(d_pot, 0, NUM_THREADS_PER_BLOCK*sizeof(double));
     cudaMemset(d_a, 0, bytes);
     checkCUDAError("memcpy h->d");
 
     // Lançamento do kernel
-    stencilKernel <<< NUM_BLOCKS, NUM_THREADS_PER_BLOCK >>> (d_a, d_r, d_pot);
+    int sharedMemSize = NUM_THREADS_PER_BLOCK*sizeof(double);
+    stencilKernel <<< NUM_BLOCKS, NUM_THREADS_PER_BLOCK, sharedMemSize >>> (d_a, d_r, d_pot);
     checkCUDAError("kernel invocation");
 
-    double pot[N];
-    cudaMemcpy(pot, d_pot, N*sizeof(double), cudaMemcpyDeviceToHost);
+    double pot[NUM_THREADS_PER_BLOCK];
+    cudaMemcpy(pot, d_pot, NUM_THREADS_PER_BLOCK*sizeof(double), cudaMemcpyDeviceToHost);
     cudaMemcpy(a, d_a, bytes, cudaMemcpyDeviceToHost);
     checkCUDAError("memcpy d->h");
 
@@ -513,12 +508,12 @@ void computeAccelsAndPotential() {
     cudaFree(d_pot);
     checkCUDAError("mem free");   
 
-    double potentialAcc = 0;
-    for(int i=0; i<N; i++){
-        potentialAcc += pot[i];
+    double potAccum = 0;
+    for(int i = 0; i < NUM_THREADS_PER_BLOCK; i++){
+        potAccum += pot[i];
     }
 
-    PE = potentialAcc;
+    PE = potAccum;
 }
 
 
