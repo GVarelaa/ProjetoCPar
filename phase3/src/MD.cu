@@ -32,15 +32,16 @@
 #include<cuda_runtime.h>
 
 // Number of particles
-const int N=5000;
+const int N=1000;
 
 #define NUM_THREADS_PER_BLOCK 256
 #define NUM_BLOCKS ((N + NUM_THREADS_PER_BLOCK - 1) / NUM_THREADS_PER_BLOCK)
 #define MAXPART NUM_BLOCKS*NUM_THREADS_PER_BLOCK
 
+double *da, *dr, *dpot, pot[NUM_BLOCKS];
+int bytes = N * 3 * sizeof(double);
+
 //  Lennard-Jones parameters in natural units!
-double sigma = 1.;
-double epsilon = 1.;
 double m = 1.0;
 double kB = 1.0;
 
@@ -263,6 +264,11 @@ int main()
         NumTime=200;
         
     }
+
+    cudaMalloc((void **)&dr, bytes);
+    cudaMalloc((void **)&dpot, NUM_BLOCKS*sizeof(double));
+    cudaMalloc((void **)&da, bytes);
+    checkCUDAError("mem allocation");
     
     //  Put all the atoms in simple crystal lattice and give them random velocities
     //  that corresponds to the initial temperature we have specified
@@ -355,7 +361,12 @@ int main()
     fclose(tfp);
     fclose(ofp);
     fclose(afp);
-    
+
+    cudaFree(dr);
+    cudaFree(da);
+    cudaFree(dpot);
+    checkCUDAError("mem free");   
+
     return 0;
 }
 
@@ -408,108 +419,82 @@ void MeanSqdVelocityAndKinetic() {
     KE = (m/2.)*vSquared;
 }
 
-__device__ 
-double atomicAddDouble(double* address, double val) {
-    unsigned long long int* address_as_ull = (unsigned long long int*)address;
-    unsigned long long int old = *address_as_ull, assumed;
-
-    do {
-        assumed = old;
-        old = atomicCAS(address_as_ull, assumed,
-                __double_as_longlong(val + __longlong_as_double(assumed)));
-    } while (assumed != old);
-
-    return __longlong_as_double(old);
+template <unsigned int blockSize>
+__device__ void warpReduce(volatile double* sdata, int tid) {
+    if (blockSize >= 64) sdata[tid] += sdata[tid + 32];
+    if (blockSize >= 32) sdata[tid] += sdata[tid + 16];
+    if (blockSize >= 16) sdata[tid] += sdata[tid + 8];
+    if (blockSize >= 8) sdata[tid] += sdata[tid + 4];
+    if (blockSize >= 4) sdata[tid] += sdata[tid + 2];
+    if (blockSize >= 2) sdata[tid] += sdata[tid + 1];
 }
 
-
-__global__ 
-void stencilKernel(double *d_a, double *d_r, double *d_pot) {
+template <unsigned int blockSize> 
+__global__ void stencilKernel(double *da, double *dr, double *dpot) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = threadIdx.x;
     if (idx >= N) return; // idx >= N-1
 
-    extern __shared__ double sdata[];
+    __shared__ double sdata[blockSize];
     sdata[tid] = 0;
     __syncthreads();
 
-    double accelAcc[3] = {0,0,0}, pot = 0;
-    double d_rx = d_r[idx*3], d_ry = d_r[idx*3 + 1], d_rz = d_r[idx*3 + 2];
+    double accelAcc[3] = {0,0,0};
+    double drx = dr[idx*3], dry = dr[idx*3 + 1], drz = dr[idx*3 + 2];
     for(int j = 0; j < N; j++) {
         if(idx != j){
             double rij[3];
-            rij[0] = d_rx - d_r[j*3];
-            rij[1] = d_ry - d_r[j*3 + 1];
-            rij[2] = d_rz - d_r[j*3 + 2];
+            rij[0] = drx - dr[j*3];
+            rij[1] = dry - dr[j*3 + 1];
+            rij[2] = drz - dr[j*3 + 2];
 
             double rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
             double rSqdInv = 1.0 / rSqd;
             double rSqd3Inv = rSqdInv * rSqdInv * rSqdInv;
             double rSqd4Inv = rSqdInv * rSqd3Inv;
 
-            pot += 4 * rSqd3Inv * (rSqd3Inv - 1);
+            sdata[tid] += 4 * rSqd3Inv * (rSqd3Inv - 1);
 
             // From derivative of Lennard-Jones with sigma and epsilon set equal to 1
             double f = rSqd4Inv * (48 * rSqd3Inv - 24);
 
             for(int k = 0; k < 3; k++){
-                double fK = rij[k] * f;
-
-                accelAcc[k] += fK;
+                accelAcc[k] += rij[k] * f;
             }
         }
     }
 
-    sdata[tid] = pot;
     for(int k = 0; k < 3; k++){
-        d_a[idx*3 + k] = accelAcc[k];
+        da[idx*3 + k] = accelAcc[k];
     }
 
-    for(unsigned int s=blockDim.x/2; s>0; s>>=1){
-        if(tid < s){
-            sdata[tid] += sdata[tid + s];
-        }
-        __syncthreads();
-    }
+    __syncthreads(); 
 
-    if(tid == 0) d_pot[blockIdx.x] = sdata[0];
+    if (blockSize >= 512) { if (tid < 256) { sdata[tid] += sdata[tid + 256]; } __syncthreads(); }
+    if (blockSize >= 256) { if (tid < 128) { sdata[tid] += sdata[tid + 128]; } __syncthreads(); }
+    if (blockSize >= 128) { if (tid < 64) { sdata[tid] += sdata[tid + 64]; } __syncthreads(); }
+    
+    if (tid < 32)  { warpReduce<blockSize>(sdata, tid); }
+    if (tid == 0) { dpot[blockIdx.x] = sdata[0]; }
 }
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom.
 void computeAccelsAndPotential() {
-    double *d_a, *d_r, *d_pot;
-
-    int bytes = N * 3 * sizeof(double);
-    
-    cudaMalloc((void **)&d_r, bytes);
-    cudaMalloc((void **)&d_pot, NUM_THREADS_PER_BLOCK*sizeof(double));
-    cudaMalloc((void **)&d_a, bytes);
-    checkCUDAError("mem allocation");
-
-    cudaMemcpy(d_r, r, bytes, cudaMemcpyHostToDevice);
-    cudaMemset(d_pot, 0, NUM_THREADS_PER_BLOCK*sizeof(double));
-    cudaMemset(d_a, 0, bytes);
+    cudaMemcpy(dr, r, bytes, cudaMemcpyHostToDevice);
     checkCUDAError("memcpy h->d");
 
     // Lançamento do kernel
-    int sharedMemSize = NUM_THREADS_PER_BLOCK*sizeof(double);
-    stencilKernel <<< NUM_BLOCKS, NUM_THREADS_PER_BLOCK, sharedMemSize >>> (d_a, d_r, d_pot);
+    stencilKernel<NUM_THREADS_PER_BLOCK> <<< NUM_BLOCKS, NUM_THREADS_PER_BLOCK >>> (da, dr, dpot);
     checkCUDAError("kernel invocation");
 
-    double pot[NUM_THREADS_PER_BLOCK];
-    cudaMemcpy(pot, d_pot, NUM_THREADS_PER_BLOCK*sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(a, d_a, bytes, cudaMemcpyDeviceToHost);
+    cudaMemcpy(pot, dpot, NUM_BLOCKS*sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(a, da, bytes, cudaMemcpyDeviceToHost);
     checkCUDAError("memcpy d->h");
 
-    cudaFree(d_r);
-    cudaFree(d_a);
-    cudaFree(d_pot);
-    checkCUDAError("mem free");   
-
     double potAccum = 0;
-    for(int i = 0; i < NUM_THREADS_PER_BLOCK; i++){
+    for(int i = 0; i < NUM_BLOCKS; i++){
         potAccum += pot[i];
     }
 
