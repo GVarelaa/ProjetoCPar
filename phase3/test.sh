@@ -8,7 +8,7 @@ file_path="src/MD.cu"
 cp $file_path "${file_path}.bak"
 
 values=(1000 5000 10000 15000 20000 25000 30000 35000 40000 45000 50000)
-threads_per_block=(256)
+threads_per_block=(128)
 repetitions=3
 
 echo "Iteration Count;Number of Atoms;Threads Per Block;Real Time; User Time; Sys Time" >  results.csv
