@@ -15,11 +15,12 @@ echo "Iteration Count;Number of Atoms;Threads Per Block;Real Time; User Time; Sy
 
 for n in "${values[@]}"; do
     for t in "${threads_per_block[@]}"; do
-        echo "Running arguments: N=$n , THREADS_PER_BLOCK:$t"
+        echo "Running arguments: N=$n , THREADS_PER_BLOCK=$t"
 
         make clean
 
         sed -i "s/const int N=.*/const int N=$n;/" $file_path
+        sed -i "s/#define NUM_THREADS_PER_BLOCK .*/#define NUM_THREADS_PER_BLOCK $t/" $file_path
 
         make
 
@@ -42,3 +43,4 @@ for n in "${values[@]}"; do
 done
 
 mv "${file_path}.bak" $file_path
+
