@@ -8,4 +8,4 @@ module load gcc/7.2.0
 module load cuda/11.3.1
 
 
-time ./bin/stencil < inputdata.txt
+time ./bin/MD < inputdata.txt
