@@ -32,7 +32,7 @@
 #include<cuda_runtime.h>
 
 // Number of particles
-const int N=1000;
+const int N=5000;
 
 #define NUM_THREADS_PER_BLOCK 256
 #define NUM_BLOCKS ((N + NUM_THREADS_PER_BLOCK - 1) / NUM_THREADS_PER_BLOCK)
@@ -419,23 +419,13 @@ void MeanSqdVelocityAndKinetic() {
     KE = (m/2.)*vSquared;
 }
 
-template <unsigned int blockSize>
-__device__ void warpReduce(volatile double* sdata, int tid) {
-    if (blockSize >= 64) sdata[tid] += sdata[tid + 32];
-    if (blockSize >= 32) sdata[tid] += sdata[tid + 16];
-    if (blockSize >= 16) sdata[tid] += sdata[tid + 8];
-    if (blockSize >= 8) sdata[tid] += sdata[tid + 4];
-    if (blockSize >= 4) sdata[tid] += sdata[tid + 2];
-    if (blockSize >= 2) sdata[tid] += sdata[tid + 1];
-}
 
-template <unsigned int blockSize> 
-__global__ void stencilKernel(double *da, double *dr, double *dpot) {
+__global__ void computeAccelsAndPotentialKernel(double *da, double *dr, double *dpot) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = threadIdx.x;
     if (idx >= N) return; // idx >= N-1
 
-    __shared__ double sdata[blockSize];
+    __shared__ double sdata[NUM_THREADS_PER_BLOCK];
     sdata[tid] = 0;
     __syncthreads();
 
@@ -470,12 +460,15 @@ __global__ void stencilKernel(double *da, double *dr, double *dpot) {
 
     __syncthreads(); 
 
-    if (blockSize >= 512) { if (tid < 256) { sdata[tid] += sdata[tid + 256]; } __syncthreads(); }
-    if (blockSize >= 256) { if (tid < 128) { sdata[tid] += sdata[tid + 128]; } __syncthreads(); }
-    if (blockSize >= 128) { if (tid < 64) { sdata[tid] += sdata[tid + 64]; } __syncthreads(); }
-    
-    if (tid < 32)  { warpReduce<blockSize>(sdata, tid); }
-    if (tid == 0) { dpot[blockIdx.x] = sdata[0]; }
+    for (unsigned int s=blockDim.x/2; s>0; s>>=1) {
+        if (tid < s) {
+            sdata[tid] += sdata[tid + s];
+        }
+
+        __syncthreads();
+    }
+
+    if (tid == 0) dpot[blockIdx.x] = sdata[0];
 }
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
@@ -486,7 +479,7 @@ void computeAccelsAndPotential() {
     checkCUDAError("memcpy h->d");
 
     // Lançamento do kernel
-    stencilKernel<NUM_THREADS_PER_BLOCK> <<< NUM_BLOCKS, NUM_THREADS_PER_BLOCK >>> (da, dr, dpot);
+    computeAccelsAndPotentialKernel <<< NUM_BLOCKS, NUM_THREADS_PER_BLOCK >>> (da, dr, dpot);
     checkCUDAError("kernel invocation");
 
     cudaMemcpy(pot, dpot, NUM_BLOCKS*sizeof(double), cudaMemcpyDeviceToHost);
