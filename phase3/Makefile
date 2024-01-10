@@ -1,5 +1,5 @@
 SHELL = /bin/sh
-BIN_NAME = stencil
+BIN_NAME = MD
 
 CXX = nvcc
 LD = nvcc
@@ -22,16 +22,19 @@ vpath %.cu $(SRC_DIR)
 .DEFAULT_GOAL = all
 
 $(BUILD_DIR)/%.o: %.cu
-	$(CXX) -c $(CXXFLAGS) $(INCLUDES) $< -o $@ $(LIBS)
+    $(CXX) -c $(CXXFLAGS) $(INCLUDES) $< -o $@ $(LIBS)
 
 $(BIN_DIR)/$(BIN_NAME): $(OBJ)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $(OBJ) $(LIBS)
+    $(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $(OBJ) $(LIBS)
 
 checkdirs:
-	@mkdir -p $(BUILD_DIR)
-	@mkdir -p $(BIN_DIR)
+    @mkdir -p $(BUILD_DIR)
+    @mkdir -p $(BIN_DIR)
 
 all: checkdirs $(BIN_DIR)/$(BIN_NAME)
 
 clean:
-	rm -f $(BUILD_DIR)/* $(BIN_DIR)/* 
+    rm -f $(BUILD_DIR)/* $(BIN_DIR)/* 
+
+run:
+    sbatch run.sh
